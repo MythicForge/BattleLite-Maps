@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Battlemap — GM View</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<aside id="deck">
+
+  <!-- Tally: the one thing worth knowing at a glance mid-session — what the
+       table can see right now. -->
+  <header id="tally" data-mode="closed">
+    <span class="lamp" aria-hidden="true"></span>
+    <div class="tallyText">
+      <strong id="tallyState">Player screen closed</strong>
+      <small id="tallyHint">Open it on the second display</small>
+    </div>
+    <button id="btnPlayer" class="tallyBtn">Open</button>
+  </header>
+
+  <section class="panel">
+    <h2>Maps <em>press 1–9</em></h2>
+    <div id="slots" class="slots"></div>
+    <p id="slotsEmpty" class="empty">No maps yet. Add one, or drop an image on the canvas.</p>
+    <div class="row">
+      <button id="btnLoad" class="primary">Add map…</button>
+    </div>
+    <div class="row">
+      <button id="btnSaveSession">Save session…</button>
+      <button id="btnOpenSession">Open session…</button>
+    </div>
+    <input type="file" id="fileInput" accept="image/*" hidden>
+    <input type="file" id="sessionInput" accept="application/json,.json" hidden>
+    <p id="saveState" class="status">No saved session yet</p>
+  </section>
+
+  <section class="panel">
+    <h2>Player camera</h2>
+    <div class="seg" id="playerMode">
+      <button data-mode="fit" class="active">Whole map</button>
+      <button data-mode="mirror">Mirror</button>
+      <button data-mode="hold">Hold</button>
+    </div>
+    <div class="row">
+      <button id="btnMatchPlayer">Jump to player view</button>
+    </div>
+    <p class="note" id="playerNote">Players see the whole map, whatever you do.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Fog of war</h2>
+    <div class="row">
+      <button id="toolHide">Hide brush</button>
+      <button id="toolReveal">Reveal brush</button>
+    </div>
+    <label class="slider">Brush size <span id="brushVal">80 px</span>
+      <input type="range" id="brushSize" min="10" max="400" value="80" step="1">
+    </label>
+    <div class="row">
+      <button id="btnHideAll">Hide all</button>
+      <button id="btnRevealAll">Reveal all</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Markers</h2>
+    <div class="row">
+      <button id="toolMarker" class="primary">Place markers</button>
+      <input type="color" id="mkColor" value="#ffd166" title="Marker color">
+    </div>
+    <div id="iconGrid" class="icons"></div>
+    <p class="note">Click to drop one cell wide. Drag out to make it bigger.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Effects</h2>
+    <div class="row">
+      <button id="toolCircle">◯ Circle</button>
+      <button id="toolLine">╱ Line</button>
+    </div>
+    <div class="row">
+      <button id="toolCone">◁ Cone</button>
+      <button id="toolSquare">▢ Square</button>
+    </div>
+    <div class="row">
+      <input type="color" id="fxColor" value="#ff4444" title="Effect color">
+      <button id="btnDeleteFx" class="danger">Delete selected</button>
+    </div>
+    <div class="row"><button id="btnClearFx" class="danger">Clear all effects</button></div>
+  </section>
+
+  <section class="panel">
+    <h2>Grid</h2>
+    <div class="seg" id="gridType">
+      <button data-type="off">Off</button>
+      <button data-type="square" class="active">Square</button>
+      <button data-type="hex">Hex</button>
+    </div>
+    <label class="slider">Cell size <span id="gridSizeVal">70 px</span>
+      <input type="range" id="gridSize" min="20" max="400" value="70" step="1">
+    </label>
+    <label class="slider">Line shade <span id="gridShadeVal">0</span>
+      <input type="range" id="gridShade" min="0" max="255" value="0" step="1">
+    </label>
+    <label class="slider">Line opacity <span id="gridOpVal">60%</span>
+      <input type="range" id="gridOp" min="0" max="100" value="60" step="1">
+    </label>
+  </section>
+
+  <section class="panel">
+    <h2>Your view</h2>
+    <div class="row">
+      <button id="btnFit">Fit</button>
+      <button id="btnCenter">Center</button>
+    </div>
+    <label class="slider">Rotation <span id="rotVal">0°</span>
+      <input type="range" id="rotSlider" min="-180" max="180" value="0" step="1">
+    </label>
+    <div class="row">
+      <button id="btnRotL">⟲ 90°</button>
+      <button id="btnRot0">0°</button>
+      <button id="btnRotR">⟳ 90°</button>
+    </div>
+  </section>
+
+  <footer id="help">
+    <dl>
+      <dt>1–9</dt><dd>open that map</dd>
+      <dt>M</dt><dd>mirror on / hold players</dd>
+      <dt>V</dt><dd>jump to the player view</dd>
+      <dt>Wheel</dt><dd>zoom · drag to pan</dd>
+      <dt>Right-drag</dt><dd>pan in any tool</dd>
+      <dt>Del</dt><dd>remove selected · Esc backs out</dd>
+    </dl>
+  </footer>
+</aside>
+
+<div id="stage">
+  <canvas id="gmCanvas"></canvas>
+  <div id="dropHint">Drop a map image here<br><small>or use Add map — png, jpg, webp</small></div>
+</div>
+
+<!-- Classic scripts, not ES modules: modules are blocked on file:// URLs.
+     All files share top-level globals; load order matters only for ui.js,
+     which runs startup code at the bottom. -->
+<script src="js/state.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/fog.js"></script>
+<script src="js/render.js"></script>
+<script src="js/maps.js"></script>
+<script src="js/map.js"></script>
+<script src="js/input.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
