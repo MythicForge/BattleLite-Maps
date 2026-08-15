@@ -11,9 +11,32 @@ function requestRender(gm = true, player = true) {
 }
 function frame() {
   rafPending = false;
-  if (dirtyGM) renderView(gmCtx, gmCanvas, false, S.cam);
-  if (dirtyP && playerWin && !playerWin.closed) renderView(pCtx, pCanvas, true, playerCam());
+  if (dirtyGM) renderView(gmCtx, gmCanvas, false, S.cam, liveSrc());
+  if (dirtyP && playerWin && !playerWin.closed) renderView(pCtx, pCanvas, true, playerCam(), playerSrc());
   dirtyGM = dirtyP = false;
+}
+
+/* ---------- what a canvas is drawing ----------
+   The GM always draws the open map. The player screen draws the *held* map
+   instead: hold parks the table on a scene as well as a camera, so the GM can
+   switch slots to prep the next fight without the table seeing it. */
+function liveSrc() {
+  return {
+    img: S.img, rotation: S.rotation, effects: S.effects, fog: fogC,
+    gridType: S.gridType, gridSize: S.gridSize, gridShade: S.gridShade, gridOp: S.gridOp,
+  };
+}
+function heldSlot() {
+  return (S.playerMode === 'hold' && S.holdSlot >= 0 && S.holdSlot !== S.active)
+    ? S.maps[S.holdSlot] || null : null;
+}
+function playerSrc() {
+  const m = heldSlot();
+  if (!m) return liveSrc();
+  return {
+    img: m.img, rotation: m.rotation, effects: m.effects, fog: m.fog,
+    gridType: m.gridType, gridSize: m.gridSize, gridShade: m.gridShade, gridOp: m.gridOp,
+  };
 }
 
 /* ---------- transforms ---------- */
@@ -26,18 +49,18 @@ function camMatrix(cam, w, h) {
   return m;
 }
 // screen <- map space
-function viewMatrix(cam, w, h) {
+function viewMatrix(cam, w, h, src = liveSrc()) {
   const m = camMatrix(cam, w, h);
-  if (S.img && S.rotation) {
-    const cx = S.img.width / 2, cy = S.img.height / 2;
+  if (src.img && src.rotation) {
+    const cx = src.img.width / 2, cy = src.img.height / 2;
     m.translateSelf(cx, cy);
-    m.rotateSelf(S.rotation);
+    m.rotateSelf(src.rotation);
     m.translateSelf(-cx, -cy);
   }
   return m;
 }
-function screenToMap(sx, sy, cam, canvas) {
-  const p = viewMatrix(cam, canvas.width, canvas.height).inverse()
+function screenToMap(sx, sy, cam, canvas, src = liveSrc()) {
+  const p = viewMatrix(cam, canvas.width, canvas.height, src).inverse()
     .transformPoint(new DOMPoint(sx, sy));
   return {x: p.x, y: p.y};
 }
@@ -48,15 +71,15 @@ function screenToCam(sx, sy, cam, canvas) {
     y: (sy - canvas.height / 2) / cam.scale + cam.y,
   };
 }
-function rotatedBBox() {
-  const r = Math.abs(S.rotation * Math.PI / 180);
+function rotatedBBox(src = liveSrc()) {
+  const r = Math.abs(src.rotation * Math.PI / 180);
   const c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
-  return {w: S.img.width * c + S.img.height * s, h: S.img.width * s + S.img.height * c};
+  return {w: src.img.width * c + src.img.height * s, h: src.img.width * s + src.img.height * c};
 }
-function fitCam(canvas) {
-  const bb = rotatedBBox();
+function fitCam(canvas, src = liveSrc()) {
+  const bb = rotatedBBox(src);
   return {
-    x: S.img.width / 2, y: S.img.height / 2,
+    x: src.img.width / 2, y: src.img.height / 2,
     scale: Math.min(canvas.width / bb.w, canvas.height / bb.h) * 0.97,
   };
 }
@@ -66,13 +89,14 @@ function fitCam(canvas) {
    'mirror' follows the GM camera live
    'hold'   parked on S.holdCam — the GM can go anywhere without moving it */
 function playerCam() {
-  if (!S.img || !pCanvas) return {x: 0, y: 0, scale: 1};
+  const src = playerSrc();
+  if (!src.img || !pCanvas) return {x: 0, y: 0, scale: 1};
   const k = pCanvas.height / gmCanvas.height;
   if (S.playerMode === 'mirror') return {x: S.cam.x, y: S.cam.y, scale: S.cam.scale * k};
   if (S.playerMode === 'hold' && S.holdCam) {
     return {x: S.holdCam.x, y: S.holdCam.y, scale: S.holdCam.scale * k};
   }
-  return fitCam(pCanvas);
+  return fitCam(pCanvas, src);
 }
 /* The player's current framing expressed as a GM camera, so the GM can jump
    back to exactly what the table is looking at. */
@@ -87,25 +111,25 @@ function playerCamAsGM() {
 }
 
 /* ---------- scene ---------- */
-function renderView(ctx, canvas, isPlayer, cam) {
+function renderView(ctx, canvas, isPlayer, cam, src = liveSrc()) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = isPlayer ? '#000' : '#0d0f13';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!S.img) return;
+  if (!src.img) return;
 
-  const m = viewMatrix(cam, canvas.width, canvas.height);
+  const m = viewMatrix(cam, canvas.width, canvas.height, src);
   ctx.setTransform(m);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(S.img, 0, 0);
+  ctx.drawImage(src.img, 0, 0);
 
-  if (S.gridType !== 'off') drawGrid(ctx, canvas, cam, m);
-  drawEffects(ctx, cam, isPlayer);
+  if (src.gridType !== 'off') drawGrid(ctx, canvas, cam, m, src);
+  drawEffects(ctx, cam, isPlayer, src);
 
   // fog last: hides map, grid, effects and markers on the player screen
-  if (fogC) {
+  if (src.fog) {
     ctx.globalAlpha = isPlayer ? 1 : 0.45;
-    ctx.drawImage(fogC, 0, 0, S.img.width, S.img.height);
+    ctx.drawImage(src.fog, 0, 0, src.img.width, src.img.height);
     ctx.globalAlpha = 1;
   }
 
@@ -113,8 +137,8 @@ function renderView(ctx, canvas, isPlayer, cam) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-function drawGrid(ctx, canvas, cam, m) {
-  const g = S.gridSize;
+function drawGrid(ctx, canvas, cam, m, src = liveSrc()) {
+  const g = src.gridSize;
   if (g * cam.scale < 6) return;               // too dense to see — skip, saves CPU
   // visible map-space rect = bbox of the four screen corners
   const inv = m.inverse();
@@ -125,15 +149,15 @@ function drawGrid(ctx, canvas, cam, m) {
     minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
   }
   minX = Math.max(minX, 0); minY = Math.max(minY, 0);
-  maxX = Math.min(maxX, S.img.width); maxY = Math.min(maxY, S.img.height);
+  maxX = Math.min(maxX, src.img.width); maxY = Math.min(maxY, src.img.height);
   if (minX >= maxX || minY >= maxY) return;
 
-  const v = S.gridShade;
-  ctx.strokeStyle = `rgba(${v},${v},${v},${S.gridOp})`;
+  const v = src.gridShade;
+  ctx.strokeStyle = `rgba(${v},${v},${v},${src.gridOp})`;
   ctx.lineWidth = 1.25 / cam.scale;
   ctx.beginPath();
 
-  if (S.gridType === 'square') {
+  if (src.gridType === 'square') {
     for (let x = Math.floor(minX / g) * g; x <= maxX; x += g) {
       ctx.moveTo(x, minY); ctx.lineTo(x, maxY);
     }
@@ -164,11 +188,11 @@ function drawGrid(ctx, canvas, cam, m) {
   ctx.stroke();
 }
 
-function drawEffects(ctx, cam, isPlayer) {
-  for (let i = 0; i < S.effects.length; i++) {
-    const e = S.effects[i];
+function drawEffects(ctx, cam, isPlayer, src = liveSrc()) {
+  for (let i = 0; i < src.effects.length; i++) {
+    const e = src.effects[i];
     const selected = !isPlayer && i === S.selected;
-    if (e.type === 'marker') { drawMarker(ctx, e, cam, selected); continue; }
+    if (e.type === 'marker') { drawMarker(ctx, e, cam, selected, src.rotation); continue; }
     effectPath(ctx, e);
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = e.color;
@@ -189,10 +213,10 @@ function drawEffects(ctx, cam, isPlayer) {
 }
 
 /* Markers counter-rotate so the icon reads upright however the map is turned. */
-function drawMarker(ctx, e, cam, selected) {
+function drawMarker(ctx, e, cam, selected, rotation = S.rotation) {
   ctx.save();
   ctx.translate(e.x1, e.y1);
-  if (S.rotation) ctx.rotate(-S.rotation * Math.PI / 180);
+  if (rotation) ctx.rotate(-rotation * Math.PI / 180);
   drawIconMark(ctx, e.icon, e.size, e.color);
   ctx.restore();
   if (selected) {
@@ -249,6 +273,15 @@ function drawGMOverlay(ctx, canvas, cam, m) {
    the frame would just trace the GM canvas edge. */
 function drawPlayerFrame(ctx, canvas, cam, m) {
   if (!playerWin || playerWin.closed || !pCanvas || S.playerMode === 'mirror') return;
+
+  // Held on a different map: a rectangle would be drawn in another map's
+  // coordinates and mean nothing here, so just name the scene they are on.
+  const other = heldSlot();
+  if (other) {
+    frameTag(ctx, canvas, m, `PLAYERS HELD ON ${other.name.toUpperCase()}`, null);
+    return;
+  }
+
   const pc = playerCam();
   const hw = pCanvas.width / pc.scale / 2, hh = pCanvas.height / pc.scale / 2;
   const held = S.playerMode === 'hold';
@@ -262,15 +295,19 @@ function drawPlayerFrame(ctx, canvas, cam, m) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // corner tag, in screen space so it stays legible at any zoom
   const cm = camMatrix(cam, canvas.width, canvas.height);
-  const tl = cm.transformPoint(new DOMPoint(pc.x - hw, pc.y - hh));
+  frameTag(ctx, canvas, m, held ? 'PLAYERS HELD HERE' : 'PLAYERS SEE WHOLE MAP',
+           cm.transformPoint(new DOMPoint(pc.x - hw, pc.y - hh)));
+}
+
+/* Corner tag, drawn in screen space so it stays legible at any zoom. Anchors
+   to the frame's top-left, or to the canvas corner when there is no frame. */
+function frameTag(ctx, canvas, m, txt, tl) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const txt = held ? 'PLAYERS HELD HERE' : 'PLAYERS SEE WHOLE MAP';
   ctx.font = `${10 * DPR}px ui-monospace, monospace`;
   const tw = ctx.measureText(txt).width;
-  const x = Math.max(2 * DPR, Math.min(tl.x, canvas.width - tw - 14 * DPR));
-  const y = Math.max(16 * DPR, Math.min(tl.y, canvas.height - 4 * DPR));
+  const x = tl ? Math.max(2 * DPR, Math.min(tl.x, canvas.width - tw - 14 * DPR)) : 12 * DPR;
+  const y = tl ? Math.max(16 * DPR, Math.min(tl.y, canvas.height - 4 * DPR)) : 26 * DPR;
   ctx.fillStyle = 'rgba(216,162,71,.92)';
   ctx.fillRect(x, y - 14 * DPR, tw + 10 * DPR, 15 * DPR);
   ctx.fillStyle = '#17140c';

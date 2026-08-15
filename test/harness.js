@@ -102,8 +102,12 @@ class Path2D {
   constructor(d) { this.d = d; this.parts = d ? [d] : []; }
   addPath(p) { this.parts.push(...(p.parts || [])); }
   arc() { this.parts.push('arc'); }
+  ellipse() { this.parts.push('ellipse'); }
   rect() { this.parts.push('rect'); }
   roundRect() { this.parts.push('roundRect'); }
+  moveTo() { this.parts.push('moveTo'); }
+  lineTo() { this.parts.push('lineTo'); }
+  closePath() { this.parts.push('closePath'); }
 }
 class Image {
   constructor() { this.width = 1000; this.height = 800; }
@@ -117,8 +121,54 @@ const localStorage = {
   removeItem: k => store.delete(k),
 };
 
+
+/* ---------- a fake IndexedDB ----------
+   Enough of the API for maps.js: open -> upgrade -> transaction -> put/get/
+   delete, all async like the real thing. Off by default so the localStorage
+   fallback gets exercised too; run.js turns it on with useFakeIDB(). */
+function fakeIndexedDB() {
+  const stores = {};
+  return {
+    stores,
+    open() {
+      const req = {};
+      setTimeout(() => {
+        req.result = {
+          createObjectStore(n) { stores[n] = {}; return {}; },
+          transaction(n) {
+            const tx = {
+              oncomplete: null, onerror: null, onabort: null,
+              objectStore: () => ({
+                put(v, k) { (stores[n] = stores[n] || {})[k] = v; return {}; },
+                get(k) {
+                  const q = {};
+                  setTimeout(() => { q.result = (stores[n] || {})[k]; if (q.onsuccess) q.onsuccess(); }, 0);
+                  return q;
+                },
+                delete(k) { if (stores[n]) delete stores[n][k]; return {}; },
+              }),
+            };
+            setTimeout(() => { if (tx.oncomplete) tx.oncomplete(); }, 0);
+            return tx;
+          },
+        };
+        if (req.onupgradeneeded) req.onupgradeneeded();
+        if (req.onsuccess) req.onsuccess();
+      }, 0);
+      return req;
+    },
+  };
+}
+function useFakeIDB() {
+  const fake = fakeIndexedDB();
+  sandbox.indexedDB = fake;
+  return fake;
+}
+
 const sandbox = {
   document, DOMMatrix, DOMPoint, Path2D, Image, localStorage, console,
+  indexedDB: null,                    // maps.js falls back to localStorage until useFakeIDB()
+  lucide: require('lucide'),          // the same package the browser loads
   requestAnimationFrame: cb => setTimeout(cb, 0),
   ResizeObserver: class { observe() {} },
   setTimeout, clearTimeout, setInterval, clearInterval,
@@ -143,15 +193,20 @@ for (const f of files) {
 // top-level const/let in classic scripts live in script scope, not on window,
 // so hand them out through an explicit accessor object
 vm.runInContext(`this.api = {
-  get S(){return S}, get ICONS(){return ICONS}, get MARKER_ICONS(){return MARKER_ICONS},
+  get S(){return S}, get MARKER_ICONS(){return MARKER_ICONS},
   get fogC(){return fogC},
   get pCanvas(){return pCanvas}, set pCanvas(v){pCanvas=v},
   get playerWin(){return playerWin}, set playerWin(v){playerWin=v},
   get pCtx(){return pCtx}, set pCtx(v){pCtx=v},
   Image, localStorage,
-  iconPath, iconSVG, addMap, showSlot, removeMap, renameMap, hitEffect, markerSize,
+  iconPath, iconSVG, iconNode, addMap, showSlot, removeMap, renameMap, hitEffect, markerSize,
   setPlayerMode, matchPlayerView, playerCam, playerCamAsGM, fitCam,
-  buildSession, restoreSession, writeSave, restoreAutosave, setTool,
+  playerSrc, liveSrc, heldSlot, liveSlotIndex,
+  buildSession, restoreSession, writeSave, restoreAutosave, setTool, jsonSize,
+  saveStatusText: () => saveState.textContent,
+  showPanel, togglePanel, escapeConsole, setDrawer, paintDock, canEncodeWebP, toWebP,
+  get openPanel(){return openPanel},
+  get flyouts(){return flyouts},
 };`, sandbox);
 
-module.exports = {sandbox, api: sandbox.api, ctxStub, makeCanvas};
+module.exports = {sandbox, api: sandbox.api, ctxStub, makeCanvas, useFakeIDB};

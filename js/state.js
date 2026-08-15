@@ -29,6 +29,7 @@ const S = {
   playerMode: 'fit',                 // 'fit' | 'mirror' | 'hold'
   mirror: false,                     // === (playerMode === 'mirror'); read by render callers
   holdCam: null,                     // camera the player screen is held on, in GM-canvas terms
+  holdSlot: -1,                      // and the map slot it is held on — hold parks the scene too
 };
 
 const MAX_SLOTS = 9;                 // 1–9 hotkeys

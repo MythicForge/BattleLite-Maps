@@ -1,0 +1,9 @@
+# Same port as `npm start`, on purpose: localhost:3000 is one origin, so the
+# session you autosaved running locally is the session you get here.
+services:
+  battlemap:
+    build: .
+    image: battlemap
+    ports:
+      - "3000:80"
+    restart: unless-stopped

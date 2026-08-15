@@ -1,4 +1,4 @@
-const {api, ctxStub, makeCanvas} = require('./harness');
+const {api, ctxStub, makeCanvas, useFakeIDB} = require('./harness');
 const s = api;
 let fails = 0;
 const ok = (name, cond, extra) => {
@@ -14,8 +14,16 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   let bad = [];
   for (const n of s.MARKER_ICONS) { try { s.iconPath(n); } catch (e) { bad.push(n + ':' + e.message); } }
   ok('all palette icons build a Path2D', bad.length === 0, bad.join(','));
-  ok('palette has 24 icons, all defined in ICONS',
-     s.MARKER_ICONS.length === 24 && s.MARKER_ICONS.every(n => s.ICONS[n]));
+  ok('palette has 24 icons, all of them names Lucide knows',
+     s.MARKER_ICONS.length === 24 && s.MARKER_ICONS.every(n => s.iconNode(n)),
+     s.MARKER_ICONS.filter(n => !s.iconNode(n)).join(','));
+  // the dock and drawer name their icons in the markup — an upstream rename
+  // would silently turn them all into an X without this
+  const markup = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
+  const named = [...markup.matchAll(/data-icon="([^"]+)"/g)].map(m => m[1]);
+  ok('every icon named in index.html exists in Lucide',
+     named.length === 10 && named.every(n => s.iconNode(n)),
+     named.filter(n => !s.iconNode(n)).join(','));
   ok('icon svg markup renders shapes', s.iconSVG('skull').includes('<circle') && s.iconSVG('lock').includes('<rect'));
 
   // ---- add two maps ----
@@ -72,6 +80,21 @@ const tick = () => new Promise(r => setTimeout(r, 60));
      Math.abs(s.playerCam().x - shownToPlayers.x) < 1e-9 &&
      Math.abs(s.playerCam().scale - shownToPlayers.scale * (1080 / 1000)) < 1e-9);
 
+  // ---- hold parks the scene, not just the camera ----
+  s.setPlayerMode('hold');
+  ok('hold remembers which scene the table is on', S.holdSlot === S.active);
+  const heldImg = S.img;
+  s.showSlot(1);                                         // GM goes to prep another map
+  ok('the GM can switch maps without moving the table',
+     s.playerSrc().img === heldImg && s.playerSrc().img !== S.img);
+  ok('the GM canvas still draws the open map', s.liveSrc().img === S.img);
+  ok('the held scene is the one lit as live', s.liveSlotIndex() === 0 && S.active === 1,
+     s.liveSlotIndex() + ' vs active ' + S.active);
+  s.matchPlayerView();                                   // V — go to what they see
+  ok('jump to player view brings the GM back to their scene', S.active === 0);
+  s.setPlayerMode('mirror');
+  ok('leaving hold lets the table follow again', S.holdSlot === -1 && s.playerSrc().img === S.img);
+
   // ---- session round trip ----
   const json = JSON.stringify(s.buildSession());
   ok('session serialises both maps', JSON.parse(json).maps.length === 2);
@@ -83,13 +106,32 @@ const tick = () => new Promise(r => setTimeout(r, 60));
      S.maps[0].name === 'Cavern' && S.maps[0].effects.length === 1);
   ok('restore never comes back mirroring', S.playerMode !== 'mirror');
 
-  // ---- autosave ----
+  // ---- autosave: no storage at all (file:// in Chrome) ----
   s.writeSave();
-  ok('autosave writes to localStorage', !!s.localStorage.getItem('battlemap.session.v1'));
-  S.maps = []; S.active = -1;
-  s.restoreAutosave();
+  await tick();
+  ok('without IndexedDB the status line says so, and nothing is written',
+     s.saveStatusText().startsWith('No autosave here'));
+
+  // ---- autosave: IndexedDB, no size cap ----
+  const idb = useFakeIDB();
+  s.writeSave();
+  await tick();
+  const stored = idb.stores.session && idb.stores.session.current;
+  ok('autosave writes the session to IndexedDB', !!stored && JSON.parse(stored).maps.length === 2);
+  ok('nothing refuses a session for being large', s.jsonSize('x'.repeat(2e7)) === '20.0 MB');
+  S.maps = []; S.active = -1; S.img = null;
+  await s.restoreAutosave();
   await tick();
   ok('autosave restores on load', S.maps.length === 2 && S.img !== null);
+
+  // a session left behind by the localStorage build is carried over once
+  idb.stores.session.current = null;
+  s.localStorage.setItem('battlemap.session.v1', stored);
+  S.maps = []; S.active = -1; S.img = null;
+  await s.restoreAutosave();
+  await tick();
+  ok('an old localStorage session is migrated, then dropped',
+     S.maps.length === 2 && s.localStorage.getItem('battlemap.session.v1') === null);
 
   // ---- fog encoding is cached ----
   let enc = 0;
@@ -103,6 +145,23 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   S.maps[0].fogDirty = true;
   s.buildSession();
   ok('changed fog is re-encoded once', enc === 1, 'encodes=' + enc);
+
+  // ---- dock flyouts and the drawer ----
+  s.showPanel('grid');
+  ok('opening a panel shows only that flyout',
+     s.openPanel === 'grid' && s.flyouts.grid.hidden === false && s.flyouts.fog.hidden === true);
+  s.togglePanel('grid');
+  ok('the same key again closes it', s.openPanel === null && s.flyouts.grid.hidden === true);
+  s.showPanel('fog');
+  s.setDrawer(true);
+  ok('Esc closes the panel before the drawer',
+     s.escapeConsole() === true && s.openPanel === null &&
+     s.escapeConsole() === true && s.escapeConsole() === false);
+
+  // ---- image encoding ----
+  ok('webp probe answers without throwing', typeof s.canEncodeWebP() === 'boolean');
+  ok('no webp encoder means the original image is kept',
+     s.canEncodeWebP() || s.toWebP({width: 10, height: 10}, 'data:image/png;base64,A') === 'data:image/png;base64,A');
 
   // ---- removing a slot ----
   s.removeMap(0);

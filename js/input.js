@@ -3,6 +3,10 @@
    Tools: select (pan + pick effects), fog brushes, effect drag-out.
    Middle/right button or held Space always pans. */
 
+/* One letter per dock key. M and V are already spoken for by the player
+   camera, so the panel letters start at F. */
+const PANEL_KEYS = {s: 'scenes', f: 'fog', k: 'marker', e: 'effects', g: 'grid', r: 'view'};
+
 function canvasPos(e) {
   const r = gmCanvas.getBoundingClientRect();
   return {x: (e.clientX - r.left) * DPR, y: (e.clientY - r.top) * DPR};
@@ -136,6 +140,12 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'v' || e.key === 'V') { matchPlayerView(); return; }
+  const panelKey = PANEL_KEYS[e.key.toLowerCase()];
+  if (panelKey) {                                  // one letter per dock key
+    if (panelKey === 'scenes') setDrawer(!document.body.classList.contains('drawer'));
+    else togglePanel(panelKey);
+    return;
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && S.selected >= 0) {
     S.effects.splice(S.selected, 1);
     S.selected = -1;
@@ -143,7 +153,8 @@ window.addEventListener('keydown', e => {
     scheduleSave();
   }
   if (e.key === 'Escape') {
-    if (drag && drag.kind === 'effect') { S.effects.pop(); drag = null; }
+    if (drag && drag.kind === 'effect') { S.effects.pop(); drag = null; requestRender(); return; }
+    if (escapeConsole()) return;                   // close the panel or drawer first
     S.selected = -1;
     setTool('select');
     requestRender();
