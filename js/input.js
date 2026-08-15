@@ -3,6 +3,10 @@
    Tools: select (pan + pick effects), fog brushes, effect drag-out.
    Middle/right button or held Space always pans. */
 
+/* One letter per dock key. M and V are already spoken for by the player
+   camera, so the panel letters start at F. */
+const PANEL_KEYS = {s: 'scenes', f: 'fog', k: 'marker', e: 'effects', g: 'grid', r: 'view'};
+
 function canvasPos(e) {
   const r = gmCanvas.getBoundingClientRect();
   return {x: (e.clientX - r.left) * DPR, y: (e.clientY - r.top) * DPR};
@@ -19,7 +23,7 @@ gmCanvas.addEventListener('wheel', e => {
   S.cam.scale = Math.min(20, Math.max(0.02, S.cam.scale * f));
   S.cam.x = before.x - (p.x - gmCanvas.width / 2) / S.cam.scale;
   S.cam.y = before.y - (p.y - gmCanvas.height / 2) / S.cam.scale;
-  requestRender(true, S.mirror);
+  requestRender(true, S.follow);
 }, {passive: false});
 
 gmCanvas.addEventListener('pointerdown', e => {
@@ -32,6 +36,13 @@ gmCanvas.addEventListener('pointerdown', e => {
 
   if (panOverride || S.tool === 'select') {
     if (!panOverride && S.tool === 'select') {
+      // the players' frame sits on top of everything: reframing beats picking
+      const grip = frameHit(p.x, p.y);
+      if (grip) {
+        drag = {kind: 'frame', mode: grip.mode, last: screenToCam(p.x, p.y, S.cam, gmCanvas)};
+        gmCanvas.style.cursor = grip.mode === 'move' ? 'grabbing' : 'nwse-resize';
+        return;
+      }
       const hit = hitEffect(mapP);
       if (hit >= 0) {
         S.selected = hit;
@@ -74,6 +85,10 @@ gmCanvas.addEventListener('pointermove', e => {
   if (!S.img) return;
 
   if (!drag) {
+    if (S.tool === 'select') {
+      const grip = frameHit(p.x, p.y);
+      gmCanvas.style.cursor = !grip ? 'grab' : (grip.mode === 'move' ? 'move' : 'nwse-resize');
+    }
     if (S.tool === 'hide' || S.tool === 'reveal' || S.tool === 'marker') requestRender(true, false);
     return;
   }
@@ -83,8 +98,16 @@ gmCanvas.addEventListener('pointermove', e => {
       S.cam.x -= (p.x - drag.last.x) / S.cam.scale;
       S.cam.y -= (p.y - drag.last.y) / S.cam.scale;
       drag.last = p;
-      requestRender(true, S.mirror);
+      requestRender(true, S.follow);
       break;
+    case 'frame': {
+      const camP = screenToCam(p.x, p.y, S.cam, gmCanvas);
+      if (drag.mode === 'move') moveFrame(camP.x - drag.last.x, camP.y - drag.last.y);
+      else resizeFrame(camP);
+      drag.last = camP;
+      requestRender(true, true);          // the table sees this as you do it
+      break;
+    }
     case 'fog':
       strokeFog(drag.last, mapP, drag.mode);
       drag.last = mapP;
@@ -131,11 +154,15 @@ window.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.code === 'Space') { spaceHeld = true; e.preventDefault(); }
   if (e.key >= '1' && e.key <= '9') { showSlot(+e.key - 1); return; }
-  if (e.key === 'm' || e.key === 'M') {           // mirror on, or park the players where they are
-    setPlayerMode(S.playerMode === 'mirror' ? 'hold' : 'mirror');
+  if (e.key === 'm' || e.key === 'M') { setFollow(!S.follow); return; }
+  if (e.key === 'p' || e.key === 'P') { sendPlayersTo(S.active, S.cam); return; }
+  if (e.key === 'v' || e.key === 'V') { matchPlayerView(); return; }
+  const panelKey = PANEL_KEYS[e.key.toLowerCase()];
+  if (panelKey) {                                  // one letter per dock key
+    if (panelKey === 'scenes') setDrawer(!document.body.classList.contains('drawer'));
+    else togglePanel(panelKey);
     return;
   }
-  if (e.key === 'v' || e.key === 'V') { matchPlayerView(); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && S.selected >= 0) {
     S.effects.splice(S.selected, 1);
     S.selected = -1;
@@ -143,7 +170,8 @@ window.addEventListener('keydown', e => {
     scheduleSave();
   }
   if (e.key === 'Escape') {
-    if (drag && drag.kind === 'effect') { S.effects.pop(); drag = null; }
+    if (drag && drag.kind === 'effect') { S.effects.pop(); drag = null; requestRender(); return; }
+    if (escapeConsole()) return;                   // close the panel or drawer first
     S.selected = -1;
     setTool('select');
     requestRender();

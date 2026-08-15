@@ -1,4 +1,4 @@
-const {api, ctxStub, makeCanvas} = require('./harness');
+const {api, ctxStub, makeCanvas, useFakeIDB} = require('./harness');
 const s = api;
 let fails = 0;
 const ok = (name, cond, extra) => {
@@ -14,8 +14,16 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   let bad = [];
   for (const n of s.MARKER_ICONS) { try { s.iconPath(n); } catch (e) { bad.push(n + ':' + e.message); } }
   ok('all palette icons build a Path2D', bad.length === 0, bad.join(','));
-  ok('palette has 24 icons, all defined in ICONS',
-     s.MARKER_ICONS.length === 24 && s.MARKER_ICONS.every(n => s.ICONS[n]));
+  ok('palette has 24 icons, all of them names Lucide knows',
+     s.MARKER_ICONS.length === 24 && s.MARKER_ICONS.every(n => s.iconNode(n)),
+     s.MARKER_ICONS.filter(n => !s.iconNode(n)).join(','));
+  // the dock and drawer name their icons in the markup — an upstream rename
+  // would silently turn them all into an X without this
+  const markup = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
+  const named = [...markup.matchAll(/data-icon="([^"]+)"/g)].map(m => m[1]);
+  ok('every icon named in index.html exists in Lucide',
+     named.length === 10 && named.every(n => s.iconNode(n)),
+     named.filter(n => !s.iconNode(n)).join(','));
   ok('icon svg markup renders shapes', s.iconSVG('skull').includes('<circle') && s.iconSVG('lock').includes('<rect'));
 
   // ---- add two maps ----
@@ -47,30 +55,78 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   ok('marker hit test misses outside', s.hitEffect({x: 400, y: 400}) === -1);
   ok('marker default size tracks cell size', s.markerSize() === 90);
 
-  // ---- player camera modes ----
+  // ---- the player screen: a frame the GM moves, not a mode ----
   const pc = makeCanvas(); pc.width = 1920; pc.height = 1080;
   s.pCanvas = pc; s.pCtx = ctxStub(); s.playerWin = {closed: false};
-  s.setPlayerMode('fit');
-  ok('fit mode frames the whole map', Math.abs(s.playerCam().scale - Math.min(1920 / 1000, 1080 / 800) * 0.97) < 1e-9);
+  s.fitPlayers();
+  ok('the table starts on the whole map',
+     Math.abs(s.playerCam().scale - Math.min(1600 / 1000, 1000 / 800) * 0.97 * (1080 / 1000)) < 1e-9);
 
-  s.setPlayerMode('mirror');
-  ok('mirror follows the GM camera', s.playerCam().x === S.cam.x && S.mirror === true);
+  s.setFollow(true);
+  ok('following puts the table on the GM camera', s.playerCam().x === S.cam.x && S.follow === true);
 
   const shownToPlayers = {...S.cam};
-  s.setPlayerMode('hold');
-  ok('hold parks on what they were seeing',
-     S.holdCam.x === shownToPlayers.x && S.holdCam.scale === shownToPlayers.scale);
-  ok('mirror flag clears when holding', S.mirror === false);
+  s.setFollow(false);
+  ok('unfollowing parks them on what they were seeing',
+     S.pcam.x === shownToPlayers.x && S.pcam.scale === shownToPlayers.scale);
 
   S.cam = {x: 5, y: 5, scale: 3};                       // GM wanders off
-  ok('players do not move while GM wanders', s.playerCam().x === shownToPlayers.x);
+  ok('the table does not move while the GM wanders', s.playerCam().x === shownToPlayers.x);
   s.matchPlayerView();                                   // the "V" key
-  ok('jump to player view restores the exact camera',
+  ok('go to their view restores the exact camera',
      S.cam.x === shownToPlayers.x && S.cam.y === shownToPlayers.y && S.cam.scale === shownToPlayers.scale);
-  s.setPlayerMode('mirror');
-  ok('re-mirroring after the jump moves nothing for players',
+  s.setFollow(true);
+  ok('following again after the jump moves nothing for them',
      Math.abs(s.playerCam().x - shownToPlayers.x) < 1e-9 &&
      Math.abs(s.playerCam().scale - shownToPlayers.scale * (1080 / 1000)) < 1e-9);
+  s.setFollow(false);
+
+  // sending a scene is the deliberate act; nothing else reaches the table
+  S.cam = {x: 111, y: 222, scale: 2};
+  s.sendPlayersTo(S.active, S.cam);
+  ok('send puts them on this scene with this framing',
+     S.playerSlot === S.active && s.playerCamAsGM().x === 111);
+
+  // ---- the table keeps its scene while the GM preps another ----
+  const theirImg = S.img;
+  s.showSlot(1);                                         // GM goes to prep another map
+  ok('the GM can switch maps without moving the table',
+     s.playerSrc().img === theirImg && s.playerSrc().img !== S.img);
+  ok('the GM canvas still draws the open map', s.liveSrc().img === S.img);
+  ok('their scene is the one lit as live', s.liveSlotIndex() === 0 && S.active === 1,
+     s.liveSlotIndex() + ' vs active ' + S.active);
+  s.matchPlayerView();                                   // V — go to what they see
+  ok('go to their view brings the GM back to their scene', S.active === 0);
+  s.setFollow(true);
+  ok('following drags them along to the GM scene', s.playerSrc().img === S.img);
+  s.setFollow(false);
+
+  // ---- the frame is draggable ----
+  ok('the frame is live while the GM is on their scene', s.editableFrame() === true);
+  const f = s.playerFrame();
+  const toScreen = (x, y) => {
+    const m = s.camMatrix(S.cam, 1600, 1000);
+    return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f];
+  };
+  ok('the frame centre does not grab — panning still works there',
+     s.frameHit(...toScreen(f.x, f.y)) === null);
+  ok('an edge grabs to move', (s.frameHit(...toScreen(f.x, f.y - f.hh)) || {}).mode === 'move');
+  ok('a corner grabs to resize',
+     (s.frameHit(...toScreen(f.x - f.hw, f.y - f.hh)) || {}).mode === 'resize');
+
+  const before = {...S.pcam};
+  s.moveFrame(40, -25);
+  ok('dragging the frame moves only the table, not the GM camera',
+     S.pcam.x === before.x + 40 && S.pcam.y === before.y - 25 && S.cam.x !== S.pcam.x);
+  const wide = s.playerFrame();
+  s.resizeFrame({x: wide.x + wide.hw * 2, y: wide.y});
+  const grown = s.playerFrame();
+  ok('a corner drag rescales and keeps the player screen aspect',
+     Math.abs(grown.hw / grown.hh - wide.hw / wide.hh) < 1e-9 && grown.hw > wide.hw * 1.9);
+
+  // adopting: a fresh scene gives the table the whole map, framed
+  ok('a newly opened scene gives the table a real camera to drag',
+     !!S.pcam && s.editableFrame() === true);
 
   // ---- session round trip ----
   const json = JSON.stringify(s.buildSession());
@@ -81,15 +137,34 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   ok('session restores both maps', S.maps.length === 2);
   ok('restored map keeps its name and marker',
      S.maps[0].name === 'Cavern' && S.maps[0].effects.length === 1);
-  ok('restore never comes back mirroring', S.playerMode !== 'mirror');
+  ok('restore never comes back following', S.follow === false);
 
-  // ---- autosave ----
+  // ---- autosave: no storage at all (file:// in Chrome) ----
   s.writeSave();
-  ok('autosave writes to localStorage', !!s.localStorage.getItem('battlemap.session.v1'));
-  S.maps = []; S.active = -1;
-  s.restoreAutosave();
+  await tick();
+  ok('without IndexedDB the status line says so, and nothing is written',
+     s.saveStatusText().startsWith('No autosave here'));
+
+  // ---- autosave: IndexedDB, no size cap ----
+  const idb = useFakeIDB();
+  s.writeSave();
+  await tick();
+  const stored = idb.stores.session && idb.stores.session.current;
+  ok('autosave writes the session to IndexedDB', !!stored && JSON.parse(stored).maps.length === 2);
+  ok('nothing refuses a session for being large', s.jsonSize('x'.repeat(2e7)) === '20.0 MB');
+  S.maps = []; S.active = -1; S.img = null;
+  await s.restoreAutosave();
   await tick();
   ok('autosave restores on load', S.maps.length === 2 && S.img !== null);
+
+  // a session left behind by the localStorage build is carried over once
+  idb.stores.session.current = null;
+  s.localStorage.setItem('battlemap.session.v1', stored);
+  S.maps = []; S.active = -1; S.img = null;
+  await s.restoreAutosave();
+  await tick();
+  ok('an old localStorage session is migrated, then dropped',
+     S.maps.length === 2 && s.localStorage.getItem('battlemap.session.v1') === null);
 
   // ---- fog encoding is cached ----
   let enc = 0;
@@ -103,6 +178,23 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   S.maps[0].fogDirty = true;
   s.buildSession();
   ok('changed fog is re-encoded once', enc === 1, 'encodes=' + enc);
+
+  // ---- dock flyouts and the drawer ----
+  s.showPanel('grid');
+  ok('opening a panel shows only that flyout',
+     s.openPanel === 'grid' && s.flyouts.grid.hidden === false && s.flyouts.fog.hidden === true);
+  s.togglePanel('grid');
+  ok('the same key again closes it', s.openPanel === null && s.flyouts.grid.hidden === true);
+  s.showPanel('fog');
+  s.setDrawer(true);
+  ok('Esc closes the panel before the drawer',
+     s.escapeConsole() === true && s.openPanel === null &&
+     s.escapeConsole() === true && s.escapeConsole() === false);
+
+  // ---- image encoding ----
+  ok('webp probe answers without throwing', typeof s.canEncodeWebP() === 'boolean');
+  ok('no webp encoder means the original image is kept',
+     s.canEncodeWebP() || s.toWebP({width: 10, height: 10}, 'data:image/png;base64,A') === 'data:image/png;base64,A');
 
   // ---- removing a slot ----
   s.removeMap(0);

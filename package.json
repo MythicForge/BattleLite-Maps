@@ -1,0 +1,14 @@
+{
+  "name": "battlemap",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local GM console and player screen for tabletop maps. Serve the folder (npx serve .) — autosave needs IndexedDB.",
+  "scripts": {
+    "start": "npx serve . -l 3000",
+    "test": "node test/run.js",
+    "check": "node --check js/state.js && node --check js/icons.js && node --check js/effects.js && node --check js/fog.js && node --check js/render.js && node --check js/maps.js && node --check js/map.js && node --check js/input.js && node --check js/ui.js"
+  },
+  "dependencies": {
+    "lucide": "^1.31.0"
+  }
+}

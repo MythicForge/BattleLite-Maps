@@ -3,14 +3,27 @@
 <head>
 <meta charset="utf-8">
 <title>Battlemap — GM View</title>
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
-<aside id="deck">
+<body data-mode="closed">
 
-  <!-- Tally: the one thing worth knowing at a glance mid-session — what the
-       table can see right now. -->
-  <header id="tally" data-mode="closed">
+<!-- The stage is the whole window now. Everything else floats over it:
+     a dock of tool keys along the bottom, one flyout per key, the scenes
+     drawer on the left and the tally chip top right. -->
+<div id="stage">
+  <canvas id="gmCanvas"></canvas>
+  <div id="dropHint">
+    <img src="logo.webp" id="dropLogo" width="512" height="598" alt="">
+    <span>Drop a map image here</span>
+    <small>or use Add map — png, jpg, webp</small>
+  </div>
+
+  <!-- Signature: the rail lights the full top edge while the table is
+       following your camera. Peripheral vision, nothing to read. -->
+  <div id="tallyRail" aria-hidden="true"></div>
+
+  <header id="tally">
     <span class="lamp" aria-hidden="true"></span>
     <div class="tallyText">
       <strong id="tallyState">Player screen closed</strong>
@@ -19,36 +32,55 @@
     <button id="btnPlayer" class="tallyBtn">Open</button>
   </header>
 
-  <section class="panel">
-    <h2>Maps <em>press 1–9</em></h2>
-    <div id="slots" class="slots"></div>
-    <p id="slotsEmpty" class="empty">No maps yet. Add one, or drop an image on the canvas.</p>
-    <div class="row">
-      <button id="btnLoad" class="primary">Add map…</button>
-    </div>
-    <div class="row">
-      <button id="btnSaveSession">Save session…</button>
-      <button id="btnOpenSession">Open session…</button>
-    </div>
-    <input type="file" id="fileInput" accept="image/*" hidden>
-    <input type="file" id="sessionInput" accept="application/json,.json" hidden>
-    <p id="saveState" class="status">No saved session yet</p>
-  </section>
+  <!-- ---------- scenes drawer ---------- -->
+  <aside id="drawer" aria-label="Maps and session">
+    <header>
+      <div class="tabs" id="drawerTabs">
+        <button class="tab active" data-tab="scenes">Scenes</button>
+        <button class="tab" data-tab="session">Session</button>
+        <button class="tab" data-tab="keys">Keys</button>
+      </div>
+      <button id="btnAddMap" class="mini" title="Add map" data-icon="plus"></button>
+      <button id="btnCloseDrawer" class="mini" title="Close (Esc)" data-icon="x"></button>
+    </header>
 
-  <section class="panel">
-    <h2>Player camera</h2>
-    <div class="seg" id="playerMode">
-      <button data-mode="fit" class="active">Whole map</button>
-      <button data-mode="mirror">Mirror</button>
-      <button data-mode="hold">Hold</button>
+    <div class="pane" id="pane-scenes" data-pane="scenes">
+      <div id="slots" class="slots"></div>
+      <p id="slotsEmpty" class="empty">No maps yet. Add one, or drop an image on the map.</p>
+      <button id="btnLoad" class="primary wide">Add map…</button>
     </div>
-    <div class="row">
-      <button id="btnMatchPlayer">Jump to player view</button>
-    </div>
-    <p class="note" id="playerNote">Players see the whole map, whatever you do.</p>
-  </section>
 
-  <section class="panel">
+    <div class="pane" id="pane-session" data-pane="session" hidden>
+      <p class="note">One file holds every map with its fog, markers, effects and
+        camera. Images are stored as WebP to keep it small.</p>
+      <button id="btnSaveSession" class="wide">Save session…</button>
+      <button id="btnOpenSession" class="wide">Open session…</button>
+    </div>
+
+    <div class="pane" id="pane-keys" data-pane="keys" hidden>
+      <dl id="help">
+        <dt>1–9</dt><dd>open that map</dd>
+        <dt>S</dt><dd>scenes drawer</dd>
+        <dt>F · K · E</dt><dd>fog · markers · effects</dd>
+        <dt>G · R</dt><dd>grid · your view</dd>
+        <dt>M</dt><dd>players follow your view / stop following</dd>
+        <dt>P</dt><dd>send this scene and framing to the table</dd>
+        <dt>V</dt><dd>go to what the table is looking at</dd>
+        <dt>F</dt><dd><em>on the player screen</em> — fullscreen, hides the address bar</dd>
+        <dt>Wheel</dt><dd>zoom · drag to pan</dd>
+        <dt>Right-drag</dt><dd>pan in any tool</dd>
+        <dt>Frame</dt><dd>drag it to reframe the table, corners to zoom them</dd>
+        <dt>Del</dt><dd>remove selected · Esc backs out</dd>
+      </dl>
+    </div>
+
+    <footer>
+      <p id="saveState" class="status">No saved session yet</p>
+    </footer>
+  </aside>
+
+  <!-- ---------- tool flyouts ---------- -->
+  <section class="flyout" id="fly-fog" data-panel="fog" hidden>
     <h2>Fog of war</h2>
     <div class="row">
       <button id="toolHide">Hide brush</button>
@@ -63,7 +95,7 @@
     </div>
   </section>
 
-  <section class="panel">
+  <section class="flyout" id="fly-marker" data-panel="marker" hidden>
     <h2>Markers</h2>
     <div class="row">
       <button id="toolMarker" class="primary">Place markers</button>
@@ -73,7 +105,7 @@
     <p class="note">Click to drop one cell wide. Drag out to make it bigger.</p>
   </section>
 
-  <section class="panel">
+  <section class="flyout" id="fly-effects" data-panel="effects" hidden>
     <h2>Effects</h2>
     <div class="row">
       <button id="toolCircle">◯ Circle</button>
@@ -90,7 +122,7 @@
     <div class="row"><button id="btnClearFx" class="danger">Clear all effects</button></div>
   </section>
 
-  <section class="panel">
+  <section class="flyout" id="fly-grid" data-panel="grid" hidden>
     <h2>Grid</h2>
     <div class="seg" id="gridType">
       <button data-type="off">Off</button>
@@ -108,7 +140,7 @@
     </label>
   </section>
 
-  <section class="panel">
+  <section class="flyout" id="fly-view" data-panel="view" hidden>
     <h2>Your view</h2>
     <div class="row">
       <button id="btnFit">Fit</button>
@@ -124,27 +156,47 @@
     </div>
   </section>
 
-  <footer id="help">
-    <dl>
-      <dt>1–9</dt><dd>open that map</dd>
-      <dt>M</dt><dd>mirror on / hold players</dd>
-      <dt>V</dt><dd>jump to the player view</dd>
-      <dt>Wheel</dt><dd>zoom · drag to pan</dd>
-      <dt>Right-drag</dt><dd>pan in any tool</dd>
-      <dt>Del</dt><dd>remove selected · Esc backs out</dd>
-    </dl>
-  </footer>
-</aside>
+  <section class="flyout" id="fly-players" data-panel="players" hidden>
+    <h2>Player screen</h2>
+    <div class="row">
+      <button id="btnFollow">Follow my view</button>
+    </div>
+    <div class="row">
+      <button id="btnSendScene">Send this scene</button>
+      <button id="btnFitPlayers">Whole map</button>
+    </div>
+    <div class="row">
+      <button id="btnMatchPlayer">Go to their view</button>
+    </div>
+    <p class="note" id="playerNote">Drag the dashed frame to reframe the table.</p>
+  </section>
 
-<div id="stage">
-  <canvas id="gmCanvas"></canvas>
-  <div id="dropHint">Drop a map image here<br><small>or use Add map — png, jpg, webp</small></div>
+  <!-- ---------- dock ---------- -->
+  <nav id="dock" aria-label="Tools">
+    <button class="key" data-key="scenes" data-hint="Scenes · S" data-icon="layers"></button>
+    <span class="sep"></span>
+    <button class="key active" data-key="select" data-hint="Select · Esc" data-icon="mouse-pointer-2"></button>
+    <button class="key" data-key="fog" data-panel="fog" data-hint="Fog of war · F" data-icon="scan-eye"></button>
+    <button class="key" data-key="marker" data-panel="marker" data-hint="Markers · K" data-icon="map-pin"></button>
+    <button class="key" data-key="effects" data-panel="effects" data-hint="Effects · E" data-icon="target"></button>
+    <span class="sep"></span>
+    <button class="key" data-key="grid" data-panel="grid" data-hint="Grid · G" data-icon="grid-3x3"></button>
+    <button class="key" data-key="view" data-panel="view" data-hint="Your view · R" data-icon="rotate-cw"></button>
+    <span class="sep"></span>
+    <button class="key" data-key="players" data-panel="players" data-hint="Player camera" data-icon="monitor"></button>
+  </nav>
 </div>
+
+<input type="file" id="fileInput" accept="image/*" hidden>
+<input type="file" id="sessionInput" accept="application/json,.json" hidden>
 
 <!-- Classic scripts, not ES modules: modules are blocked on file:// URLs.
      All files share top-level globals; load order matters only for ui.js,
      which runs startup code at the bottom. -->
 <script src="js/state.js"></script>
+<!-- Lucide, loaded from node_modules as a classic script: no network, no
+     modules, just a file on disk next to this one. -->
+<script src="node_modules/lucide/dist/umd/lucide.min.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/effects.js"></script>
 <script src="js/fog.js"></script>

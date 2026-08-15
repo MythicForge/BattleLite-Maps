@@ -10,6 +10,20 @@
    as data URLs). The same JSON is autosaved to localStorage after each change,
    so reopening the page picks up where the table left off. */
 
+/* Everything a session carries is a data URL, so the encoder choice is the
+   whole file-size story. WebP is roughly a quarter of the equivalent PNG and
+   keeps alpha, which the fog mask needs. Probed once against a 1px canvas;
+   browsers that cannot encode it fall back to what they could always do. */
+let webpOK = null;
+function canEncodeWebP() {
+  if (webpOK === null) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 1;
+    webpOK = String(c.toDataURL('image/webp')).startsWith('data:image/webp');
+  }
+  return webpOK;
+}
+
 function makeThumb(img) {
   const c = document.createElement('canvas');
   c.width = 176; c.height = 110;
@@ -19,7 +33,7 @@ function makeThumb(img) {
   const s = Math.max(c.width / img.width, c.height / img.height);
   const w = img.width * s, h = img.height * s;
   x.drawImage(img, (c.width - w) / 2, (c.height - h) / 2, w, h);
-  return c.toDataURL('image/jpeg', 0.6);
+  return c.toDataURL(canEncodeWebP() ? 'image/webp' : 'image/jpeg', 0.6);
 }
 
 function blankSlot(img, src, name) {
@@ -42,10 +56,12 @@ function blankSlot(img, src, name) {
 }
 
 /* Encoding a 2560px fog mask is the expensive part of a save, so each slot
-   keeps its last PNG until fog.js marks the mask dirty. */
+   keeps its last encode until fog.js marks the mask dirty. The mask is flat
+   black under an alpha channel, and WebP stores alpha losslessly even in its
+   lossy mode, so the edges survive the smaller file. */
 function fogDataURL(m) {
   if (m.fogDirty || !m.fogURL) {
-    m.fogURL = m.fog.toDataURL('image/png');
+    m.fogURL = m.fog.toDataURL(canEncodeWebP() ? 'image/webp' : 'image/png');
     m.fogDirty = false;
   }
   return m.fogURL;
@@ -66,7 +82,10 @@ function commitActive() {
 
 function applySlot(i) {
   const m = S.maps[i];
+  // the table comes along while following, or when it has nowhere else to be
+  const adopt = S.follow || S.playerSlot < 0 || !S.maps[S.playerSlot];
   S.active = i;
+  if (adopt) S.playerSlot = i;
   S.img = m.img;
   S.rotation = m.rotation;
   S.gridType = m.gridType; S.gridSize = m.gridSize;
@@ -75,6 +94,7 @@ function applySlot(i) {
   S.selected = -1;
   fogC = m.fog; fogCtx = fogC.getContext('2d'); fogScale = m.fogScale;
   S.cam = m.cam ? {...m.cam} : fitCam(gmCanvas);
+  if (adopt) S.pcam = fitCam(gmCanvas, liveSrc());   // they get the whole scene to start
   dropHint.style.display = 'none';
   syncControls();
   refreshSlots();
@@ -103,6 +123,8 @@ function addMap(img, src, name) {
 function removeMap(i) {
   if (i < 0 || i >= S.maps.length) return;
   S.maps.splice(i, 1);
+  if (S.playerSlot === i) { S.playerSlot = -1; S.pcam = null; }   // the table was on it
+  else if (S.playerSlot > i) S.playerSlot--;
   if (S.maps.length === 0) {
     S.active = -1; S.img = null; S.effects = []; S.selected = -1;
     fogC = null; fogCtx = null;
@@ -126,7 +148,7 @@ function buildSession() {
   return {
     v: 1,
     active: S.active,
-    playerMode: S.playerMode,
+
     fxColor: S.fxColor, mkColor: S.mkColor, mkIcon: S.mkIcon, brushSize: S.brushSize,
     maps: S.maps.map(m => ({
       name: m.name, src: m.src,
@@ -175,7 +197,11 @@ async function restoreSession(data) {
   if (data.mkColor) S.mkColor = data.mkColor;
   if (data.mkIcon) S.mkIcon = data.mkIcon;
   if (data.brushSize) S.brushSize = data.brushSize;
-  setPlayerMode(data.playerMode === 'mirror' ? 'fit' : (data.playerMode || 'fit'));
+  // a restored session never comes back following: the table gets the whole
+  // map of whatever scene was open, and nothing moves until the GM moves it
+  S.follow = false;
+  S.playerSlot = -1;
+  S.pcam = null;
   if (maps.length) applySlot(Math.min(Math.max(data.active | 0, 0), maps.length - 1));
   else { S.img = null; dropHint.style.display = ''; refreshSlots(); requestRender(); }
 }
@@ -206,18 +232,75 @@ function openSessionFile(file) {
   r.readAsText(file);
 }
 
-/* ---------- autosave ---------- */
+/* ---------- autosave ----------
+
+   Served over http (npx serve .), so IndexedDB is available in every browser
+   and there is no size limit to work around: nine 4000px maps and their fog
+   masks are tens of megabytes and that is fine. Opened as a file:// URL
+   instead, Chrome blocks IndexedDB outright — then there is no autosave and
+   the status line says so rather than pretending.
+
+   localStorage is read once, to carry over a session saved by the older
+   build, and then dropped. */
 const SAVE_KEY = 'battlemap.session.v1';
-const SAVE_LIMIT = 4.6e6;            // localStorage tops out around 5 MB
+const DB_NAME = 'battlemap', DB_STORE = 'session', DB_KEY = 'current';
 let saveTimer = null;
+let dbPromise = null;
+
+const hasIDB = () => typeof indexedDB !== 'undefined' && indexedDB !== null;
+
+function db() {
+  if (!dbPromise) {
+    dbPromise = new Promise((res, rej) => {
+      const r = indexedDB.open(DB_NAME, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(DB_STORE);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error || new Error('IndexedDB is not available here'));
+    });
+  }
+  return dbPromise;
+}
+function idbWrite(json) {
+  return db().then(d => new Promise((res, rej) => {
+    const t = d.transaction(DB_STORE, 'readwrite');
+    if (json === null) t.objectStore(DB_STORE).delete(DB_KEY);
+    else t.objectStore(DB_STORE).put(json, DB_KEY);
+    t.oncomplete = res;
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error('write aborted'));
+  }));
+}
+function idbRead() {
+  return db().then(d => new Promise((res, rej) => {
+    const q = d.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(DB_KEY);
+    q.onsuccess = () => res(q.result || null);
+    q.onerror = () => rej(q.error);
+  }));
+}
 
 function scheduleSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(writeSave, 1200);
 }
 
+function clock() {
+  const t = new Date();
+  return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+}
+const jsonSize = json => (json.length / 1e6).toFixed(1) + ' MB';
+const NO_STORE = 'No autosave here — serve the folder (npx serve .) or use Save session';
+
+/* Ask the browser not to evict this origin under disk pressure. Secure
+   contexts only, which localhost is; ignored everywhere else. */
+function keepStorage() {
+  if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
+  }
+}
+
 function writeSave() {
-  if (!S.maps.length) { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} return; }
+  if (!hasIDB()) { setSaveStatus(NO_STORE, 'warn'); return; }
+  if (!S.maps.length) { idbWrite(null).catch(() => {}); return; }
   let json;
   try {
     json = JSON.stringify(buildSession());
@@ -225,24 +308,31 @@ function writeSave() {
     setSaveStatus('Could not autosave this session', 'warn');
     return;
   }
-  if (json.length > SAVE_LIMIT) {
-    setSaveStatus(`Too large to autosave (${(json.length / 1e6).toFixed(1)} MB) — use Save session`, 'warn');
-    return;
-  }
-  try {
-    localStorage.setItem(SAVE_KEY, json);
-    const t = new Date();
-    setSaveStatus(`Autosaved ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`, 'ok');
-  } catch (e) {
-    setSaveStatus('Autosave is full — use Save session to keep this', 'warn');
-  }
+  idbWrite(json)
+    .then(() => setSaveStatus(`Autosaved ${clock()} · ${jsonSize(json)}`, 'ok'))
+    .catch(err => setSaveStatus(`Autosave failed: ${err && err.name === 'QuotaExceededError'
+      ? 'the browser is out of room for this site' : 'use Save session to keep this'}`, 'warn'));
 }
 
+/* Reads IndexedDB, then the old localStorage session once — a session saved
+   by the previous build is carried over and the localStorage copy dropped. */
 function restoreAutosave() {
-  let json = null;
-  try { json = localStorage.getItem(SAVE_KEY); } catch (e) {}
-  if (!json) { setSaveStatus('No saved session yet', ''); return; }
-  restoreSession(JSON.parse(json))
-    .then(() => setSaveStatus(`Restored ${S.maps.length} map${S.maps.length === 1 ? '' : 's'} from autosave`, 'ok'))
-    .catch(() => setSaveStatus('Saved session could not be read', 'warn'));
+  if (!hasIDB()) { setSaveStatus(NO_STORE, 'warn'); return Promise.resolve(); }
+  keepStorage();
+  let migrated = false;
+  return idbRead().catch(() => null).then(json => {
+    if (!json) {
+      try { json = localStorage.getItem(SAVE_KEY); } catch (e) {}
+      migrated = !!json;
+    }
+    if (!json) { setSaveStatus('No saved session yet', ''); return; }
+    return restoreSession(JSON.parse(json)).then(() => {
+      setSaveStatus(`Restored ${S.maps.length} map${S.maps.length === 1 ? '' : 's'} from autosave`, 'ok');
+      if (S.maps.length) setDrawer(false);      // there is a map to look at
+      if (migrated) {
+        try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+        scheduleSave();                          // and it lives in IndexedDB from now on
+      }
+    });
+  }).catch(() => setSaveStatus('Saved session could not be read', 'warn'));
 }
