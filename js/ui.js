@@ -172,13 +172,13 @@ document.getElementById('btnRot0').onclick = () => setRotation(0);
 document.getElementById('btnFit').onclick = () => {
   if (!S.img) return;
   S.cam = fitCam(gmCanvas);
-  requestRender(true, S.mirror);
+  requestRender(true, S.follow);
 };
 document.getElementById('btnCenter').onclick = () => {
   if (!S.img) return;
   S.cam.x = S.img.width / 2;
   S.cam.y = S.img.height / 2;
-  requestRender(true, S.mirror);
+  requestRender(true, S.follow);
 };
 
 /* ---------- grid ---------- */
@@ -247,9 +247,12 @@ function refreshSlots() {
     b.title = `${m.name} — press ${i + 1}, double-click to rename`;
     b.innerHTML = `<span class="led"></span><span class="num">${i + 1}</span>` +
                   `<span class="name"></span><span class="tag">On air</span>` +
+                  `<span class="send" title="Send the table to this scene">` +
+                  iconSVG('monitor', 13) + `</span>` +
                   `<span class="kill" title="Remove this map">×</span>`;
     b.querySelector('.name').textContent = m.name;
     b.onclick = e => {
+      if (e.target.closest && e.target.closest('.send')) { sendPlayersTo(i); return; }
       if (e.target.classList.contains('kill')) {
         if (confirm(`Remove “${m.name}”? Its fog, markers and effects go with it.`)) removeMap(i);
         return;
@@ -277,72 +280,90 @@ document.getElementById('sessionInput').onchange = e => {
   e.target.value = '';
 };
 
-/* ---------- player camera ---------- */
+/* ---------- the player screen ----------
+   The table's view is a frame on the GM canvas, not a mode: drag it to
+   reframe them. `follow` is the only thing that links the two cameras, and
+   while it is on the frame is locked, because the frame *is* your view. */
 const tally = document.getElementById('tally');
 const tallyState = document.getElementById('tallyState');
 const tallyHint = document.getElementById('tallyHint');
 const btnPlayer = document.getElementById('btnPlayer');
 const playerNote = document.getElementById('playerNote');
-const modeSeg = document.getElementById('playerMode');
+const btnFollow = document.getElementById('btnFollow');
 
-const MODE_COPY = {
-  closed: ['Player screen closed', 'Open it, drag it to the TV, click it for fullscreen'],
-  fit: ['Whole map', 'Players see everything you have revealed'],
-  mirror: ['Mirroring · live', 'Players follow your camera'],
-  hold: ['Held', 'Players are parked — look around freely'],
+const STATE_COPY = {
+  closed: ['Player screen closed', 'Open it on the second display'],
+  follow: ['Following you · live', 'The table sees your camera and your scenes'],
+  parked: ['Table parked', 'Drag the frame to reframe them'],
 };
 const NOTE_COPY = {
-  fit: 'Players see the whole map, whatever you do.',
-  mirror: 'Players follow your camera. Press M to park them here and go scouting.',
-  hold: 'Players are parked on this scene and framing. Switch maps freely — they stay put. Press V to rejoin them, then M to mirror again.',
+  follow: 'The table is on your camera. Anything you open, they see. Press M to leave them here and go scouting.',
+  parked: 'Drag the dashed frame to reframe the table, its corners to zoom them. Press P to send them your scene.',
 };
 
-function setPlayerMode(mode) {
-  if (mode === 'hold') {
-    S.holdCam = playerCamAsGM();      // park on what they can see right now,
-    S.holdSlot = S.active;            // on the scene they are looking at
-  } else {
-    S.holdSlot = -1;
-  }
-  S.playerMode = mode;
-  S.mirror = mode === 'mirror';
-  for (const b of modeSeg.children) b.classList.toggle('active', b.dataset.mode === mode);
-  updateTally();
-  refreshSlots();                     // the ON AIR lamp may have moved to another card
+/* The camera the table gets when they first arrive somewhere: the whole map. */
+function fitPlayers() {
+  if (!S.img) return;
+  S.pcam = fitCam(gmCanvas, playerSrc());
   requestRender(true, true);
 }
-for (const b of modeSeg.children) b.onclick = () => setPlayerMode(b.dataset.mode);
 
-/* The mode lives on <body> as well: the tally chip, the top rail and the LED
-   on the live scene card are all styled off it. */
-/* The slot the table is actually looking at — the open one, unless hold has
-   parked them on a different scene. */
-function liveSlotIndex() {
-  const held = S.playerMode === 'hold' && S.holdSlot >= 0 && S.maps[S.holdSlot];
-  return held ? S.holdSlot : S.active;
+function setFollow(on) {
+  if (on) { if (S.img) S.playerSlot = S.active; }   // following means their scene is yours
+  else if (S.img) S.pcam = playerCamAsGM();        // park them exactly where they are now
+  S.follow = !!on;
+  updateTally();
+  refreshSlots();
+  requestRender(true, true);
 }
 
+/* Put the table on a scene — the open one by default (P), or a card in the
+   drawer. Their framing comes with it, so the shot is deliberate. */
+function sendPlayersTo(i, cam) {
+  if (i < 0 || !S.maps[i]) return;
+  S.playerSlot = i;
+  S.pcam = cam ? {...cam} : (i === S.active ? {...S.cam} : null);
+  if (!S.pcam) S.pcam = fitCam(gmCanvas, playerSrc());
+  updateTally();
+  refreshSlots();
+  requestRender(true, true);
+}
+
+btnFollow.onclick = () => setFollow(!S.follow);
+document.getElementById('btnSendScene').onclick = () => sendPlayersTo(S.active, S.cam);
+document.getElementById('btnFitPlayers').onclick = fitPlayers;
+
+/* The slot the table is actually looking at. */
+function liveSlotIndex() {
+  if (S.follow) return S.active;
+  return (S.playerSlot >= 0 && S.maps[S.playerSlot]) ? S.playerSlot : S.active;
+}
+
+/* The state lives on <body> too: the tally chip, the top rail and the ON AIR
+   lamp on the scene card are all styled off it. */
 function updateTally() {
   const open = playerWin && !playerWin.closed;
-  const key = open ? S.playerMode : 'closed';
+  const key = !open ? 'closed' : (S.follow ? 'follow' : 'parked');
   document.body.dataset.mode = key;
-  tallyState.textContent = MODE_COPY[key][0];
-  const parked = S.playerMode === 'hold' && S.holdSlot >= 0 &&
-                 S.holdSlot !== S.active && S.maps[S.holdSlot];
-  tallyHint.textContent = (open && parked)
-    ? `Parked on ${S.maps[S.holdSlot].name} — you are off-screen`
-    : MODE_COPY[key][1];
+  tallyState.textContent = STATE_COPY[key][0];
+  const away = !S.follow && S.playerSlot >= 0 && S.playerSlot !== S.active && S.maps[S.playerSlot];
+  tallyHint.textContent = (open && away)
+    ? `On ${S.maps[S.playerSlot].name} — you are off-screen`
+    : STATE_COPY[key][1];
   btnPlayer.textContent = open ? 'Focus' : 'Open';
-  playerNote.textContent = NOTE_COPY[S.playerMode];
+  btnFollow.classList.toggle('active', S.follow);
+  btnFollow.textContent = S.follow ? 'Following you' : 'Follow my view';
+  playerNote.textContent = NOTE_COPY[S.follow ? 'follow' : 'parked'];
 }
 
+/* V — go and stand where the table is standing, scene included. */
 function matchPlayerView() {
   if (!S.img) return;
   const cam = playerCamAsGM();
-  const parked = S.playerMode === 'hold' && S.holdSlot >= 0 && S.holdSlot !== S.active;
-  if (parked && S.maps[S.holdSlot]) showSlot(S.holdSlot);   // their scene, not just their framing
+  const away = !S.follow && S.playerSlot >= 0 && S.playerSlot !== S.active;
+  if (away && S.maps[S.playerSlot]) showSlot(S.playerSlot);
   S.cam = cam;
-  requestRender(true, S.mirror);
+  requestRender(true, S.follow);
 }
 document.getElementById('btnMatchPlayer').onclick = matchPlayerView;
 
@@ -420,6 +441,7 @@ sizeGM();
 syncControls();
 paintDock();
 updateTally();
+if (!S.pcam && S.img) fitPlayers();
 /* Nothing on the stage and no obvious way in, so the drawer starts open;
    restoreAutosave closes it again if it brings maps back (the read is async
    now that the session lives in IndexedDB). */

@@ -82,7 +82,10 @@ function commitActive() {
 
 function applySlot(i) {
   const m = S.maps[i];
+  // the table comes along while following, or when it has nowhere else to be
+  const adopt = S.follow || S.playerSlot < 0 || !S.maps[S.playerSlot];
   S.active = i;
+  if (adopt) S.playerSlot = i;
   S.img = m.img;
   S.rotation = m.rotation;
   S.gridType = m.gridType; S.gridSize = m.gridSize;
@@ -91,6 +94,7 @@ function applySlot(i) {
   S.selected = -1;
   fogC = m.fog; fogCtx = fogC.getContext('2d'); fogScale = m.fogScale;
   S.cam = m.cam ? {...m.cam} : fitCam(gmCanvas);
+  if (adopt) S.pcam = fitCam(gmCanvas, liveSrc());   // they get the whole scene to start
   dropHint.style.display = 'none';
   syncControls();
   refreshSlots();
@@ -119,8 +123,8 @@ function addMap(img, src, name) {
 function removeMap(i) {
   if (i < 0 || i >= S.maps.length) return;
   S.maps.splice(i, 1);
-  if (S.holdSlot === i) setPlayerMode('fit');        // the table was parked on it
-  else if (S.holdSlot > i) S.holdSlot--;
+  if (S.playerSlot === i) { S.playerSlot = -1; S.pcam = null; }   // the table was on it
+  else if (S.playerSlot > i) S.playerSlot--;
   if (S.maps.length === 0) {
     S.active = -1; S.img = null; S.effects = []; S.selected = -1;
     fogC = null; fogCtx = null;
@@ -144,7 +148,7 @@ function buildSession() {
   return {
     v: 1,
     active: S.active,
-    playerMode: S.playerMode,
+
     fxColor: S.fxColor, mkColor: S.mkColor, mkIcon: S.mkIcon, brushSize: S.brushSize,
     maps: S.maps.map(m => ({
       name: m.name, src: m.src,
@@ -193,7 +197,11 @@ async function restoreSession(data) {
   if (data.mkColor) S.mkColor = data.mkColor;
   if (data.mkIcon) S.mkIcon = data.mkIcon;
   if (data.brushSize) S.brushSize = data.brushSize;
-  setPlayerMode(data.playerMode === 'mirror' ? 'fit' : (data.playerMode || 'fit'));
+  // a restored session never comes back following: the table gets the whole
+  // map of whatever scene was open, and nothing moves until the GM moves it
+  S.follow = false;
+  S.playerSlot = -1;
+  S.pcam = null;
   if (maps.length) applySlot(Math.min(Math.max(data.active | 0, 0), maps.length - 1));
   else { S.img = null; dropHint.style.display = ''; refreshSlots(); requestRender(); }
 }

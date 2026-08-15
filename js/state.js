@@ -26,10 +26,12 @@ const S = {
   maps: [],                          // map slots, see maps.js
   active: -1,                        // index into S.maps, -1 = nothing loaded
 
-  playerMode: 'fit',                 // 'fit' | 'mirror' | 'hold'
-  mirror: false,                     // === (playerMode === 'mirror'); read by render callers
-  holdCam: null,                     // camera the player screen is held on, in GM-canvas terms
-  holdSlot: -1,                      // and the map slot it is held on — hold parks the scene too
+  /* The table's view is always an explicit thing, not a mode: a camera and
+     the scene it is parked on. `follow` is the one live link to the GM —
+     with it off, nothing the GM does reaches the table until they send it. */
+  pcam: null,                        // player camera {x,y,scale}, in GM-canvas terms
+  playerSlot: -1,                    // scene the table is on; -1 until a map exists
+  follow: false,                     // table tracks the GM camera *and* scene changes
 };
 
 const MAX_SLOTS = 9;                 // 1–9 hotkeys

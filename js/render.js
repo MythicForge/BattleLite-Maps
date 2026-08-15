@@ -26,12 +26,14 @@ function liveSrc() {
     gridType: S.gridType, gridSize: S.gridSize, gridShade: S.gridShade, gridOp: S.gridOp,
   };
 }
-function heldSlot() {
-  return (S.playerMode === 'hold' && S.holdSlot >= 0 && S.holdSlot !== S.active)
-    ? S.maps[S.holdSlot] || null : null;
+/* The scene the table is parked on, when it is not the one the GM has open.
+   Following drags them along; parked leaves them where they are. */
+function parkedSlot() {
+  return (!S.follow && S.playerSlot >= 0 && S.playerSlot !== S.active)
+    ? S.maps[S.playerSlot] || null : null;
 }
 function playerSrc() {
-  const m = heldSlot();
+  const m = parkedSlot();
   if (!m) return liveSrc();
   return {
     img: m.img, rotation: m.rotation, effects: m.effects, fog: m.fog,
@@ -85,29 +87,71 @@ function fitCam(canvas, src = liveSrc()) {
 }
 
 /* ---------- player camera ----------
-   'fit'    the whole map, refit every frame
-   'mirror' follows the GM camera live
-   'hold'   parked on S.holdCam — the GM can go anywhere without moving it */
+   One camera, S.pcam, kept in GM-canvas terms so the GM canvas can draw it as
+   a frame and the two views convert cleanly. Following overrides it live;
+   everything else is the GM moving that frame by hand. */
 function playerCam() {
   const src = playerSrc();
   if (!src.img || !pCanvas) return {x: 0, y: 0, scale: 1};
   const k = pCanvas.height / gmCanvas.height;
-  if (S.playerMode === 'mirror') return {x: S.cam.x, y: S.cam.y, scale: S.cam.scale * k};
-  if (S.playerMode === 'hold' && S.holdCam) {
-    return {x: S.holdCam.x, y: S.holdCam.y, scale: S.holdCam.scale * k};
-  }
-  return fitCam(pCanvas, src);
+  if (S.follow) return {x: S.cam.x, y: S.cam.y, scale: S.cam.scale * k};
+  const c = S.pcam || fitCam(gmCanvas, src);
+  return {x: c.x, y: c.y, scale: c.scale * k};
 }
 /* The player's current framing expressed as a GM camera, so the GM can jump
    back to exactly what the table is looking at. */
 function playerCamAsGM() {
   if (!S.img) return {...S.cam};
-  if (S.playerMode === 'mirror') return {...S.cam};
-  if (S.playerMode === 'hold' && S.holdCam) return {...S.holdCam};
-  if (!pCanvas) return fitCam(gmCanvas);
-  const pc = fitCam(pCanvas);
-  const w = pCanvas.width / pc.scale, h = pCanvas.height / pc.scale;
-  return {x: pc.x, y: pc.y, scale: Math.min(gmCanvas.width / w, gmCanvas.height / h)};
+  if (S.follow) return {...S.cam};
+  if (S.pcam) return {...S.pcam};
+  return fitCam(gmCanvas, playerSrc());
+}
+
+/* ---------- the hold frame, as something you can grab ----------
+   In hold the frame is the table's viewport, drawn in camera space, so it is
+   axis-aligned on screen however the map is rotated. Dragging it moves what
+   the players see without touching the GM camera — which is the point: you
+   frame the fight for them, then go and look at the corridor.
+
+   Only while the GM is on the held scene; if hold is parked on another slot
+   there is nothing here to drag. */
+function editableFrame() {
+  return !S.follow && S.pcam && playerWin && !playerWin.closed && pCanvas && !parkedSlot();
+}
+function playerFrame() {
+  if (!editableFrame()) return null;
+  const pc = playerCam();
+  return {x: pc.x, y: pc.y, hw: pCanvas.width / pc.scale / 2, hh: pCanvas.height / pc.scale / 2};
+}
+/* What is under the pointer: a corner resizes, an edge moves. Only the border
+   grabs — the frame usually covers most of the canvas, and dragging inside it
+   still has to pan the GM's own view. */
+function frameHit(sx, sy) {
+  const f = playerFrame();
+  if (!f) return null;
+  const p = screenToCam(sx, sy, S.cam, gmCanvas);
+  const tol = 11 * DPR / S.cam.scale;
+  const dx = Math.abs(p.x - f.x), dy = Math.abs(p.y - f.y);
+  const onX = Math.abs(dx - f.hw) < tol, onY = Math.abs(dy - f.hh) < tol;
+  const inX = dx < f.hw + tol, inY = dy < f.hh + tol;
+  if (onX && onY) return {mode: 'resize'};
+  if ((onX && inY) || (onY && inX)) return {mode: 'move'};
+  return null;
+}
+/* Resize keeps the player screen's aspect — the frame *is* their screen — and
+   works about the centre, so the shot you framed stays framed. */
+function resizeFrame(camP) {
+  const f = playerFrame();
+  if (!f || !gmCanvas.height) return;
+  const k = pCanvas.height / gmCanvas.height;
+  const hw = Math.max(Math.abs(camP.x - f.x), Math.abs(camP.y - f.y) * (f.hw / f.hh));
+  if (hw < 1) return;
+  const scale = (pCanvas.width / (hw * 2)) / k;
+  S.pcam.scale = Math.min(20, Math.max(0.02, scale));
+}
+function moveFrame(dx, dy) {
+  S.pcam.x += dx;
+  S.pcam.y += dy;
 }
 
 /* ---------- scene ---------- */
@@ -272,31 +316,39 @@ function drawGMOverlay(ctx, canvas, cam, m) {
    still see where the table's attention is parked. Pointless while mirroring —
    the frame would just trace the GM canvas edge. */
 function drawPlayerFrame(ctx, canvas, cam, m) {
-  if (!playerWin || playerWin.closed || !pCanvas || S.playerMode === 'mirror') return;
+  if (!playerWin || playerWin.closed || !pCanvas || S.follow) return;
 
-  // Held on a different map: a rectangle would be drawn in another map's
+  // Parked on a different map: a rectangle would be drawn in another map's
   // coordinates and mean nothing here, so just name the scene they are on.
-  const other = heldSlot();
+  const other = parkedSlot();
   if (other) {
-    frameTag(ctx, canvas, m, `PLAYERS HELD ON ${other.name.toUpperCase()}`, null);
+    frameTag(ctx, canvas, m, `PLAYERS ARE ON ${other.name.toUpperCase()}`, null);
     return;
   }
 
   const pc = playerCam();
   const hw = pCanvas.width / pc.scale / 2, hh = pCanvas.height / pc.scale / 2;
-  const held = S.playerMode === 'hold';
 
   ctx.setTransform(camMatrix(cam, canvas.width, canvas.height));
   ctx.beginPath();
   ctx.rect(pc.x - hw, pc.y - hh, hw * 2, hh * 2);
-  ctx.strokeStyle = held ? 'rgba(216,162,71,.9)' : 'rgba(216,162,71,.35)';
+  ctx.strokeStyle = 'rgba(216,162,71,.9)';
   ctx.lineWidth = 2 / cam.scale;
   ctx.setLineDash([10 / cam.scale, 7 / cam.scale]);
   ctx.stroke();
   ctx.setLineDash([]);
 
+  // corner grips, so the frame reads as something you can take hold of
+  if (editableFrame()) {
+    const g = 5 / cam.scale;
+    ctx.fillStyle = 'rgba(216,162,71,.95)';
+    for (const gx of [pc.x - hw, pc.x + hw]) {
+      for (const gy of [pc.y - hh, pc.y + hh]) ctx.fillRect(gx - g, gy - g, g * 2, g * 2);
+    }
+  }
+
   const cm = camMatrix(cam, canvas.width, canvas.height);
-  frameTag(ctx, canvas, m, held ? 'PLAYERS HELD HERE' : 'PLAYERS SEE WHOLE MAP',
+  frameTag(ctx, canvas, m, 'DRAG TO REFRAME · WHAT THE TABLE SEES',
            cm.transformPoint(new DOMPoint(pc.x - hw, pc.y - hh)));
 }
 

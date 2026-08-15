@@ -86,7 +86,6 @@ function segChildren(key, vals) {
 reg('gmCanvas', makeCanvas());
 registry.gmCanvas.width = 1600; registry.gmCanvas.height = 1000;
 reg('gridType').children = segChildren('type', ['off', 'square', 'hex']);
-reg('playerMode').children = segChildren('mode', ['fit', 'mirror', 'hold']);
 reg('iconGrid');
 reg('slots');
 
@@ -200,8 +199,9 @@ vm.runInContext(`this.api = {
   get pCtx(){return pCtx}, set pCtx(v){pCtx=v},
   Image, localStorage,
   iconPath, iconSVG, iconNode, addMap, showSlot, removeMap, renameMap, hitEffect, markerSize,
-  setPlayerMode, matchPlayerView, playerCam, playerCamAsGM, fitCam,
-  playerSrc, liveSrc, heldSlot, liveSlotIndex,
+  setFollow, sendPlayersTo, fitPlayers, matchPlayerView, playerCam, playerCamAsGM, fitCam,
+  playerSrc, liveSrc, parkedSlot, liveSlotIndex,
+  playerFrame, frameHit, moveFrame, resizeFrame, editableFrame, camMatrix,
   buildSession, restoreSession, writeSave, restoreAutosave, setTool, jsonSize,
   saveStatusText: () => saveState.textContent,
   showPanel, togglePanel, escapeConsole, setDrawer, paintDock, canEncodeWebP, toWebP,

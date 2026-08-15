@@ -155,7 +155,7 @@ button:disabled:hover{background:var(--raise-2); border-color:var(--edge);}
 .seg button{border:none; background:none; border-radius:5px; padding:6px 4px; font-size:11.5px; color:var(--dim);}
 .seg button:hover{background:var(--raise-2); color:var(--text);}
 .seg button.active{background:var(--brass); color:var(--brass-ink);}
-#playerMode button[data-mode=mirror].active{background:var(--live); color:#fff;}
+#btnFollow.active{background:var(--live); border-color:var(--live); color:#fff;}
 
 label.slider{display:block; font-size:11.5px; color:var(--dim);}
 label.slider span{float:right; color:var(--text); font:11px/1.4 var(--mono);}
@@ -238,6 +238,16 @@ body.drawer #drawer{transform:none; opacity:1; visibility:visible;}
   font:600 13.5px/1.05 var(--narrow); letter-spacing:.05em; text-transform:uppercase;
   color:#dfe4ec; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
+.slot .send{
+  position:absolute; top:0; right:21px; z-index:3; width:22px; height:20px;
+  display:grid; place-items:center; color:#fff; background:rgba(10,12,16,.72);
+  opacity:0;
+}
+.slot .send svg{width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.8;
+  stroke-linecap:round; stroke-linejoin:round; pointer-events:none;}
+.slot:hover .send,.slot:focus-within .send{opacity:1;}
+.slot .send:hover{background:var(--live);}
+.slot.live .send{display:none;}
 .slot .kill{
   position:absolute; top:0; right:0; z-index:3; width:20px; height:20px;
   text-align:center; font:12px/19px var(--sans); color:#fff; background:rgba(10,12,16,.72);

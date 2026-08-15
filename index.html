@@ -63,11 +63,13 @@
         <dt>S</dt><dd>scenes drawer</dd>
         <dt>F · K · E</dt><dd>fog · markers · effects</dd>
         <dt>G · R</dt><dd>grid · your view</dd>
-        <dt>M</dt><dd>mirror on / hold players on this scene</dd>
-        <dt>V</dt><dd>jump to the player view</dd>
+        <dt>M</dt><dd>players follow your view / stop following</dd>
+        <dt>P</dt><dd>send this scene and framing to the table</dd>
+        <dt>V</dt><dd>go to what the table is looking at</dd>
         <dt>F</dt><dd><em>on the player screen</em> — fullscreen, hides the address bar</dd>
         <dt>Wheel</dt><dd>zoom · drag to pan</dd>
         <dt>Right-drag</dt><dd>pan in any tool</dd>
+        <dt>Frame</dt><dd>drag it to reframe the table, corners to zoom them</dd>
         <dt>Del</dt><dd>remove selected · Esc backs out</dd>
       </dl>
     </div>
@@ -155,16 +157,18 @@
   </section>
 
   <section class="flyout" id="fly-players" data-panel="players" hidden>
-    <h2>Player camera</h2>
-    <div class="seg" id="playerMode">
-      <button data-mode="fit" class="active">Whole map</button>
-      <button data-mode="mirror">Mirror</button>
-      <button data-mode="hold">Hold</button>
+    <h2>Player screen</h2>
+    <div class="row">
+      <button id="btnFollow">Follow my view</button>
     </div>
     <div class="row">
-      <button id="btnMatchPlayer">Jump to player view</button>
+      <button id="btnSendScene">Send this scene</button>
+      <button id="btnFitPlayers">Whole map</button>
     </div>
-    <p class="note" id="playerNote">Players see the whole map, whatever you do.</p>
+    <div class="row">
+      <button id="btnMatchPlayer">Go to their view</button>
+    </div>
+    <p class="note" id="playerNote">Drag the dashed frame to reframe the table.</p>
   </section>
 
   <!-- ---------- dock ---------- -->

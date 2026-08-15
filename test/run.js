@@ -55,45 +55,78 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   ok('marker hit test misses outside', s.hitEffect({x: 400, y: 400}) === -1);
   ok('marker default size tracks cell size', s.markerSize() === 90);
 
-  // ---- player camera modes ----
+  // ---- the player screen: a frame the GM moves, not a mode ----
   const pc = makeCanvas(); pc.width = 1920; pc.height = 1080;
   s.pCanvas = pc; s.pCtx = ctxStub(); s.playerWin = {closed: false};
-  s.setPlayerMode('fit');
-  ok('fit mode frames the whole map', Math.abs(s.playerCam().scale - Math.min(1920 / 1000, 1080 / 800) * 0.97) < 1e-9);
+  s.fitPlayers();
+  ok('the table starts on the whole map',
+     Math.abs(s.playerCam().scale - Math.min(1600 / 1000, 1000 / 800) * 0.97 * (1080 / 1000)) < 1e-9);
 
-  s.setPlayerMode('mirror');
-  ok('mirror follows the GM camera', s.playerCam().x === S.cam.x && S.mirror === true);
+  s.setFollow(true);
+  ok('following puts the table on the GM camera', s.playerCam().x === S.cam.x && S.follow === true);
 
   const shownToPlayers = {...S.cam};
-  s.setPlayerMode('hold');
-  ok('hold parks on what they were seeing',
-     S.holdCam.x === shownToPlayers.x && S.holdCam.scale === shownToPlayers.scale);
-  ok('mirror flag clears when holding', S.mirror === false);
+  s.setFollow(false);
+  ok('unfollowing parks them on what they were seeing',
+     S.pcam.x === shownToPlayers.x && S.pcam.scale === shownToPlayers.scale);
 
   S.cam = {x: 5, y: 5, scale: 3};                       // GM wanders off
-  ok('players do not move while GM wanders', s.playerCam().x === shownToPlayers.x);
+  ok('the table does not move while the GM wanders', s.playerCam().x === shownToPlayers.x);
   s.matchPlayerView();                                   // the "V" key
-  ok('jump to player view restores the exact camera',
+  ok('go to their view restores the exact camera',
      S.cam.x === shownToPlayers.x && S.cam.y === shownToPlayers.y && S.cam.scale === shownToPlayers.scale);
-  s.setPlayerMode('mirror');
-  ok('re-mirroring after the jump moves nothing for players',
+  s.setFollow(true);
+  ok('following again after the jump moves nothing for them',
      Math.abs(s.playerCam().x - shownToPlayers.x) < 1e-9 &&
      Math.abs(s.playerCam().scale - shownToPlayers.scale * (1080 / 1000)) < 1e-9);
+  s.setFollow(false);
 
-  // ---- hold parks the scene, not just the camera ----
-  s.setPlayerMode('hold');
-  ok('hold remembers which scene the table is on', S.holdSlot === S.active);
-  const heldImg = S.img;
+  // sending a scene is the deliberate act; nothing else reaches the table
+  S.cam = {x: 111, y: 222, scale: 2};
+  s.sendPlayersTo(S.active, S.cam);
+  ok('send puts them on this scene with this framing',
+     S.playerSlot === S.active && s.playerCamAsGM().x === 111);
+
+  // ---- the table keeps its scene while the GM preps another ----
+  const theirImg = S.img;
   s.showSlot(1);                                         // GM goes to prep another map
   ok('the GM can switch maps without moving the table',
-     s.playerSrc().img === heldImg && s.playerSrc().img !== S.img);
+     s.playerSrc().img === theirImg && s.playerSrc().img !== S.img);
   ok('the GM canvas still draws the open map', s.liveSrc().img === S.img);
-  ok('the held scene is the one lit as live', s.liveSlotIndex() === 0 && S.active === 1,
+  ok('their scene is the one lit as live', s.liveSlotIndex() === 0 && S.active === 1,
      s.liveSlotIndex() + ' vs active ' + S.active);
   s.matchPlayerView();                                   // V — go to what they see
-  ok('jump to player view brings the GM back to their scene', S.active === 0);
-  s.setPlayerMode('mirror');
-  ok('leaving hold lets the table follow again', S.holdSlot === -1 && s.playerSrc().img === S.img);
+  ok('go to their view brings the GM back to their scene', S.active === 0);
+  s.setFollow(true);
+  ok('following drags them along to the GM scene', s.playerSrc().img === S.img);
+  s.setFollow(false);
+
+  // ---- the frame is draggable ----
+  ok('the frame is live while the GM is on their scene', s.editableFrame() === true);
+  const f = s.playerFrame();
+  const toScreen = (x, y) => {
+    const m = s.camMatrix(S.cam, 1600, 1000);
+    return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f];
+  };
+  ok('the frame centre does not grab — panning still works there',
+     s.frameHit(...toScreen(f.x, f.y)) === null);
+  ok('an edge grabs to move', (s.frameHit(...toScreen(f.x, f.y - f.hh)) || {}).mode === 'move');
+  ok('a corner grabs to resize',
+     (s.frameHit(...toScreen(f.x - f.hw, f.y - f.hh)) || {}).mode === 'resize');
+
+  const before = {...S.pcam};
+  s.moveFrame(40, -25);
+  ok('dragging the frame moves only the table, not the GM camera',
+     S.pcam.x === before.x + 40 && S.pcam.y === before.y - 25 && S.cam.x !== S.pcam.x);
+  const wide = s.playerFrame();
+  s.resizeFrame({x: wide.x + wide.hw * 2, y: wide.y});
+  const grown = s.playerFrame();
+  ok('a corner drag rescales and keeps the player screen aspect',
+     Math.abs(grown.hw / grown.hh - wide.hw / wide.hh) < 1e-9 && grown.hw > wide.hw * 1.9);
+
+  // adopting: a fresh scene gives the table the whole map, framed
+  ok('a newly opened scene gives the table a real camera to drag',
+     !!S.pcam && s.editableFrame() === true);
 
   // ---- session round trip ----
   const json = JSON.stringify(s.buildSession());
@@ -104,7 +137,7 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   ok('session restores both maps', S.maps.length === 2);
   ok('restored map keeps its name and marker',
      S.maps[0].name === 'Cavern' && S.maps[0].effects.length === 1);
-  ok('restore never comes back mirroring', S.playerMode !== 'mirror');
+  ok('restore never comes back following', S.follow === false);
 
   // ---- autosave: no storage at all (file:// in Chrome) ----
   s.writeSave();
