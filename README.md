@@ -25,8 +25,8 @@ If this is something you feel would be helpful to you and your table, here is so
 
 **Fog of war**
 - Hide and reveal brushes with an adjustable radius, plus **Hide all** / **Reveal all**.
-- The GM sees fog at 45% so you can work through it; the table sees it opaque.
-- The brushes are each other's inverse, so there is no undo — paint back over it.
+- The GM sees fog at 45% so you can work through it; the table sees it as pitch black.
+- There is no undo button so you will need to paint back over for small fixes.
 
 **Grid**
 - Off / square / hex (pointy-top). Cell size, line shade (black→white) and opacity.
@@ -35,17 +35,17 @@ If this is something you feel would be helpful to you and your table, here is so
 **Effects and markers**
 - Templates — circle, line, cone, square — in any colour. They persist until you delete them, so a lingering fireball stays lingering.
 - **Markers**: 24 [Lucide](https://lucide.dev) icons the GM drops to designate things (a door, a trap, "look here"). Click places one cell wide; drag out to scale. They counter-rotate so icons read upright at any map rotation.
-- Drag to measure — the readout assumes 5 ft per cell.
+- The default measurement is 5 ft per cell.
 
 **Player screen — the frame is the control**
 - Open it with the **Open** button (top right), then drag it to the second display and press `F` in that window for fullscreen. Browsers won't let a popup hide its own address bar; fullscreen is what actually clears the chrome.
 - A dashed **frame** on your canvas is exactly what the table sees. Drag the frame to reframe them, grab a corner to zoom them. The frame's interior still pans  your own view.
 - **Follow** (`M`) locks the table to your camera — a red hairline lights the top edge of your screen the whole time it's on, so you know without reading anything. Release it and they stay where they were.
 - Send the current scene and framing with `P`; jump your own view to theirs with `V`.
-- The table can sit on a *different* scene from the one you're editing — prep the next encounter while they look at this one.
+- The table can sit on a *different* scene from the one you're editing to prep the next encounter.
 
 **Session persistence**
-- **Autosave** to IndexedDB, debounced ~1.2 s, no size cap. Requests persistent   storage so the browser won't evict it.
+- **Autosave** to IndexedDB, debounced ~1.2 s, no size cap. Requests persistent storage so the browser won't evict it.
 - **Save session… / Open session…** writes one JSON file holding every scene with its image, fog mask, effects, markers, camera and grid.
 - Autosave is keyed to the **origin** you serve on. `localhost:3000` and  `localhost:5000` are different sessions; change the port and the console comes up empty. Use *Save session…* before moving.
 
@@ -78,9 +78,8 @@ The image is nginx plus static files; node and npm stay in the build stage.
 
 The app is written to work by opening directly but Chrome gives no IndexedDB there, so **there is no autosave**. Save session files by hand if you go that route. 
 
-> `node_modules/` must sit next to `index.html` — `index.html` loads Lucide from
-> `node_modules/lucide/dist/umd/lucide.min.js` as a plain file, never from a CDN.
-> Copying the app elsewhere means copying that too, or re-running `npm install`.
+> If you want the lucide icons, you will still need to run `npm install` first to add them
+> `node_modules/` must sit at the same folder level as `index.html`
 
 ---
 
