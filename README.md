@@ -10,6 +10,7 @@ It runs entirely in the browser. With no extra frills, bells and whistles beyond
 The design and purpose of this app was to be the opposite of what a lot of modern VTT apps have become, and be just a simple tool that allows for GM's and players to play without having to worry your PC sounding like a jet engine taking off.
 
 This was 100% created using AI. If you are an advocate against using anything AI, I apologize but you will need to find another app. This is **NOT** intended as a statement of whether AI is good or not, just being up front and honest how this app was made.
+
 I lack the skill or desire to take the time away from daily life to pour into a tool I use once a weekend. However, if you are a developer and would like to contribute or want to adjust I am not opposed to contributions.
 
 If this is something you feel would be helpful to you and your table, here is some documentation.
