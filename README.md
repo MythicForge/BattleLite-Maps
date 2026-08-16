@@ -11,9 +11,9 @@ The design and purpose of this app was to be the opposite of what a lot of moder
 
 This was 100% created using AI. If you are an advocate against using anything AI, I apologize but you will need to find another app. This is **NOT** intended as a statement of whether AI is good or not, just being up front and honest how this app was made.
 
-I lack the skill or desire to take the time away from daily life to pour into a tool I use once a weekend. However, if you are a developer and would like to contribute or want to adjust I am not opposed to contributions.
+I lack the skill or desire to take the time away from daily life to pour into a tool I use once a weekend. However, if you are a developer and would like to contribute or want to adjust I am not opposed to contributions. Just know if I find something I want to adjust, it will at some point go back to AI and will read the codebase.
 
-If this is something you feel would be helpful to you and your table, here is some documentation.
+Otherwise, if this is something you feel would be helpful to you and your table; here is some documentation.
 
 ---
 
