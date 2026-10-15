@@ -66,11 +66,14 @@
         <dt>M</dt><dd>players follow your view / stop following</dd>
         <dt>P</dt><dd>send this scene and framing to the table</dd>
         <dt>V</dt><dd>go to what the table is looking at</dd>
+        <dt>B</dt><dd>black out the table screen / bring the map back</dd>
+        <dt>L</dt><dd>lock the table to 1 inch cells / unlock</dd>
         <dt>F</dt><dd><em>on the player screen</em> — fullscreen, hides the address bar</dd>
         <dt>Wheel</dt><dd>zoom · drag to pan</dd>
         <dt>Right-drag</dt><dd>pan in any tool</dd>
         <dt>Frame</dt><dd>drag it to reframe the table, corners to zoom them</dd>
         <dt>Del</dt><dd>remove selected · Esc backs out</dd>
+        <dt>Ctrl+Z</dt><dd>undo fog · Ctrl+Shift+Z or Ctrl+Y redoes</dd>
       </dl>
     </div>
 
@@ -92,6 +95,10 @@
     <div class="row">
       <button id="btnHideAll">Hide all</button>
       <button id="btnRevealAll">Reveal all</button>
+    </div>
+    <div class="row">
+      <button id="btnFogUndo" disabled>Undo · Ctrl+Z</button>
+      <button id="btnFogRedo" disabled>Redo</button>
     </div>
   </section>
 
@@ -129,8 +136,17 @@
       <button data-type="square" class="active">Square</button>
       <button data-type="hex">Hex</button>
     </div>
-    <label class="slider">Cell size <span id="gridSizeVal">70 px</span>
-      <input type="range" id="gridSize" min="20" max="400" value="70" step="1">
+    <div class="row">
+      <button id="toolGridMatch" class="primary">Match printed grid</button>
+    </div>
+    <label class="slider">Cell size (map px) <span id="gridSizeVal">70.0 px</span>
+      <input type="range" id="gridSize" min="20" max="400" value="70" step="0.1">
+    </label>
+    <label class="slider">Shift across <span id="gridOffXVal">0.0 px</span>
+      <input type="range" id="gridOffX" min="0" max="70" value="0" step="0.1">
+    </label>
+    <label class="slider">Shift down <span id="gridOffYVal">0.0 px</span>
+      <input type="range" id="gridOffY" min="0" max="70" value="0" step="0.1">
     </label>
     <label class="slider">Line shade <span id="gridShadeVal">0</span>
       <input type="range" id="gridShade" min="0" max="255" value="0" step="1">
@@ -138,6 +154,9 @@
     <label class="slider">Line opacity <span id="gridOpVal">60%</span>
       <input type="range" id="gridOp" min="0" max="100" value="60" step="1">
     </label>
+    <p class="note">Match printed grid: drag from one printed grid corner to another a few
+      squares away, then say how many squares across. More squares is more exact.
+      Fine-tune with the sliders — click one and use the arrow keys for 0.1 px steps.</p>
   </section>
 
   <section class="flyout" id="fly-view" data-panel="view" hidden>
@@ -168,7 +187,29 @@
     <div class="row">
       <button id="btnMatchPlayer">Go to their view</button>
     </div>
+    <div class="row">
+      <button id="btnBlackout">Black out the table · B</button>
+    </div>
     <p class="note" id="playerNote">Drag the dashed frame to reframe the table.</p>
+
+    <h2>Table scale</h2>
+    <div class="row">
+      <button id="btnInchLock" disabled>1 cell = 1 inch · L</button>
+    </div>
+    <label class="slider">TV pixels per inch <span id="tablePpiVal">not set</span>
+      <input type="range" id="tablePpi" min="10" max="300" value="96" step="0.1">
+    </label>
+    <div class="row">
+      <input type="number" id="tvDiag" placeholder="TV size (in)" min="5" max="200" step="0.1">
+      <button id="btnTvDiag">Estimate</button>
+    </div>
+    <div class="row">
+      <button id="btnRuler">Show inch ruler on table</button>
+    </div>
+    <p class="note" id="tableNote">Type the TV's diagonal for a first guess, then show the
+      ruler and nudge the slider until each square measures 1 inch.</p>
+    <p class="note">The lock makes one <em>grid cell</em> one inch, so line the grid up with
+      the map first (Grid panel). Changing cell size while locked zooms the table.</p>
   </section>
 
   <!-- ---------- dock ---------- -->

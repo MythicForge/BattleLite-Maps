@@ -22,7 +22,7 @@ const flyouts = {
 /* which dock key owns each tool, so the key lights while the tool is armed */
 const TOOL_KEY = {
   select: 'select', hide: 'fog', reveal: 'fog', marker: 'marker',
-  circle: 'effects', line: 'effects', cone: 'effects', square: 'effects',
+  circle: 'effects', line: 'effects', cone: 'effects', square: 'effects', gridmatch: 'grid',
 };
 let openPanel = null;
 
@@ -110,6 +110,7 @@ const toolButtons = {
   cone: document.getElementById('toolCone'),
   square: document.getElementById('toolSquare'),
   marker: document.getElementById('toolMarker'),
+  gridmatch: document.getElementById('toolGridMatch'),
 };
 function setTool(t) {
   S.tool = (S.tool === t) ? 'select' : t;        // toggle off = back to select
@@ -120,7 +121,7 @@ function setTool(t) {
   paintDock();
   requestRender(true, false);
 }
-for (const name of ['hide', 'reveal', 'circle', 'line', 'cone', 'square', 'marker']) {
+for (const name of ['hide', 'reveal', 'circle', 'line', 'cone', 'square', 'marker', 'gridmatch']) {
   toolButtons[name].onclick = () => setTool(name);
 }
 
@@ -131,10 +132,28 @@ function bindSlider(id, valId, fmt, apply) {
   el.onchange = scheduleSave;
 }
 bindSlider('rotSlider', 'rotVal', v => v + '°', v => { S.rotation = v; requestRender(); });
-bindSlider('gridSize', 'gridSizeVal', v => v + ' px', v => { S.gridSize = v; requestRender(); });
+const fmtPx = v => (+v).toFixed(1) + ' px';
+bindSlider('gridSize', 'gridSizeVal', fmtPx, v => { S.gridSize = v; fitOffsetSliders(); requestRender(); });
+bindSlider('gridOffX', 'gridOffXVal', fmtPx, v => { S.gridOffX = v; requestRender(); });
+bindSlider('gridOffY', 'gridOffYVal', fmtPx, v => { S.gridOffY = v; requestRender(); });
 bindSlider('gridShade', 'gridShadeVal', v => v, v => { S.gridShade = v; requestRender(); });
 bindSlider('gridOp', 'gridOpVal', v => v + '%', v => { S.gridOp = v / 100; requestRender(); });
 bindSlider('brushSize', 'brushVal', v => v + ' px', v => { S.brushSize = v; requestRender(true, false); });
+
+/* One repeat of the grid covers every alignment, so each offset slider spans
+   exactly that; past it the grid would just repeat. Hex rows alternate, so
+   they repeat every two rows down (g·√3), not every cell. */
+function gridPeriod(axis) {
+  return (axis === 'Y' && S.gridType === 'hex') ? S.gridSize * Math.sqrt(3) : S.gridSize;
+}
+function fitOffsetSliders() {
+  for (const k of ['X', 'Y']) {
+    const key = 'gridOff' + k, p = gridPeriod(k);
+    if (S[key] < 0 || S[key] >= p) S[key] = ((S[key] % p) + p) % p;
+    document.getElementById(key).max = p;
+    putSlider(key, key + 'Val', S[key], fmtPx);
+  }
+}
 
 function putSlider(id, valId, value, fmt) {
   const el = document.getElementById(id);
@@ -145,13 +164,15 @@ function putSlider(id, valId, value, fmt) {
    session restore, when the live map changed underneath the console. */
 function syncControls() {
   putSlider('rotSlider', 'rotVal', S.rotation, v => v + '°');
-  putSlider('gridSize', 'gridSizeVal', S.gridSize, v => v + ' px');
+  putSlider('gridSize', 'gridSizeVal', S.gridSize, fmtPx);
+  fitOffsetSliders();
   putSlider('gridShade', 'gridShadeVal', S.gridShade, v => v);
   putSlider('gridOp', 'gridOpVal', Math.round(S.gridOp * 100), v => v + '%');
   putSlider('brushSize', 'brushVal', S.brushSize, v => v + ' px');
   document.getElementById('fxColor').value = S.fxColor;
   document.getElementById('mkColor').value = S.mkColor;
   for (const b of gridSeg.children) b.classList.toggle('active', b.dataset.type === S.gridType);
+  refreshFogUndo();
   for (const b of document.querySelectorAll('#iconGrid button')) {
     b.classList.toggle('active', b.dataset.icon === S.mkIcon);
   }
@@ -187,14 +208,50 @@ for (const btn of gridSeg.children) {
   btn.onclick = () => {
     S.gridType = btn.dataset.type;
     for (const b of gridSeg.children) b.classList.toggle('active', b === btn);
+    fitOffsetSliders();
     requestRender();
     scheduleSave();
   };
 }
 
+/* Match printed grid: the GM drags corner to corner across a run of printed
+   squares and says how many. Cell size is that span over the count — a long
+   run averages out click error, which a single square never would. The drag's
+   top-left corner is a grid corner, so it sets the shift too. */
+function finishGridMatch(a, b) {
+  const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+  setTool('select');
+  if (Math.max(w, h) < 10) return false;
+  const along = w >= h ? w : h;
+  const guess = Math.max(1, Math.round(along / S.gridSize));
+  const n = parseFloat(prompt(`How many printed squares ${w >= h ? 'across' : 'down'} did you drag over?`, guess));
+  if (!(n >= 1)) return false;
+  let cell = along / n;
+  const other = w >= h ? h : w, m = Math.round(other / cell);
+  if (m >= 1) cell = (along + other) / (n + m);   // both sides measured: use both
+  S.gridSize = Math.min(400, Math.max(20, cell));
+  if (S.gridType !== 'square') S.gridType = 'square';
+  S.gridOffX = Math.min(a.x, b.x);
+  S.gridOffY = Math.min(a.y, b.y);
+  syncControls();                                 // also wraps the shift into one cell
+  requestRender();
+  scheduleSave();
+  return true;
+}
+
 /* ---------- fog ---------- */
 document.getElementById('btnHideAll').onclick = () => { if (fogC) { hideAll(); scheduleSave(); } };
 document.getElementById('btnRevealAll').onclick = () => { if (fogC) { revealAll(); scheduleSave(); } };
+const btnFogUndo = document.getElementById('btnFogUndo');
+const btnFogRedo = document.getElementById('btnFogRedo');
+btnFogUndo.onclick = () => { if (undoFog()) scheduleSave(); };
+btnFogRedo.onclick = () => { if (redoFog()) scheduleSave(); };
+/* History is per map, so the buttons follow slot switches too. */
+function refreshFogUndo() {
+  const m = S.maps[S.active];
+  btnFogUndo.disabled = !(m && m.fogUndo && m.fogUndo.length);
+  btnFogRedo.disabled = !(m && m.fogRedo && m.fogRedo.length);
+}
 
 /* ---------- effects ---------- */
 document.getElementById('fxColor').oninput = e => {
@@ -290,6 +347,7 @@ const tallyHint = document.getElementById('tallyHint');
 const btnPlayer = document.getElementById('btnPlayer');
 const playerNote = document.getElementById('playerNote');
 const btnFollow = document.getElementById('btnFollow');
+const btnBlackout = document.getElementById('btnBlackout');
 
 const STATE_COPY = {
   closed: ['Player screen closed', 'Open it on the second display'],
@@ -329,6 +387,81 @@ function sendPlayersTo(i, cam) {
   requestRender(true, true);
 }
 
+/* B — the table goes black while you swap scenes or set something up, and
+   comes back exactly as it was. Not saved: a reload never starts dark. */
+function setBlackout(on) {
+  S.blackout = !!on;
+  updateTally();
+  requestRender(true, true);
+}
+document.getElementById('btnBlackout').onclick = () => setBlackout(!S.blackout);
+
+/* ---------- table scale ----------
+   Pixels per inch of the TV, in player-canvas pixels. A first guess comes
+   from the diagonal; the ruler on the table is what makes it exact. Saved per
+   browser — it describes the hardware, so it should not travel in a session. */
+const TABLE_KEY = 'battlemap.table.v1';
+const btnInchLock = document.getElementById('btnInchLock');
+const btnRuler = document.getElementById('btnRuler');
+const tableNote = document.getElementById('tableNote');
+const tablePpi = document.getElementById('tablePpi');
+
+function loadTable() {
+  try {
+    const t = JSON.parse(localStorage.getItem(TABLE_KEY) || 'null');
+    if (t && t.ppi > 0) S.table = {ppi: +t.ppi, lock: !!t.lock};
+  } catch (e) {}
+}
+function saveTable() {
+  try { localStorage.setItem(TABLE_KEY, JSON.stringify(S.table)); } catch (e) {}
+}
+function refreshTable() {
+  if (S.table.ppi) putSlider('tablePpi', 'tablePpiVal', S.table.ppi, v => (+v).toFixed(1) + ' px');
+  btnInchLock.disabled = !S.table.ppi;
+  btnInchLock.classList.toggle('active', S.table.lock && !!S.table.ppi);
+  btnRuler.classList.toggle('active', S.calibrating);
+  btnRuler.textContent = S.calibrating ? 'Hide the ruler' : 'Show inch ruler on table';
+}
+function setTablePpi(ppi) {
+  S.table.ppi = Math.min(300, Math.max(10, Math.round(ppi * 10) / 10));
+  saveTable();
+  refreshTable();
+  requestRender(true, true);
+}
+function setInchLock(on) {
+  if (on && !S.table.ppi) {
+    tableNote.textContent = 'Set pixels per inch first — type the TV size or use the ruler.';
+    showPanel('players');
+    return;
+  }
+  S.table.lock = !!on;
+  saveTable();
+  refreshTable();
+  requestRender(true, true);
+}
+function setRuler(on) {
+  S.calibrating = !!on;
+  if (on && !S.table.ppi) setTablePpi(+tablePpi.value);   // start from where the slider sits
+  if (on && !(playerWin && !playerWin.closed)) tableNote.textContent = 'Open the player screen to see the ruler on the TV.';
+  refreshTable();
+  requestRender(true, true);
+}
+tablePpi.oninput = () => setTablePpi(+tablePpi.value);
+btnInchLock.onclick = () => setInchLock(!S.table.lock);
+btnRuler.onclick = () => setRuler(!S.calibrating);
+document.getElementById('btnTvDiag').onclick = () => {
+  const diag = +document.getElementById('tvDiag').value;
+  if (!(diag > 0)) { tableNote.textContent = 'Type the TV diagonal in inches, e.g. 55.'; return; }
+  if (!playerWin || playerWin.closed) {
+    tableNote.textContent = 'Open the player screen on the TV first — the estimate reads its resolution.';
+    return;
+  }
+  // screen.* is in that window's CSS px; the player canvas is CSS px × DPR
+  const sc = playerWin.screen;
+  setTablePpi(Math.hypot(sc.width, sc.height) * DPR / diag);
+  tableNote.textContent = `Estimated from a ${sc.width}×${sc.height} screen. Show the ruler to check it.`;
+};
+
 btnFollow.onclick = () => setFollow(!S.follow);
 document.getElementById('btnSendScene').onclick = () => sendPlayersTo(S.active, S.cam);
 document.getElementById('btnFitPlayers').onclick = fitPlayers;
@@ -353,6 +486,12 @@ function updateTally() {
   btnPlayer.textContent = open ? 'Focus' : 'Open';
   btnFollow.classList.toggle('active', S.follow);
   btnFollow.textContent = S.follow ? 'Following you' : 'Follow my view';
+  btnBlackout.classList.toggle('active', S.blackout);
+  btnBlackout.textContent = S.blackout ? 'Show the map · B' : 'Black out the table · B';
+  if (open && S.blackout) {
+    tallyState.textContent = 'Table blacked out';
+    tallyHint.textContent = 'Press B to show them the map';
+  }
   playerNote.textContent = NOTE_COPY[S.follow ? 'follow' : 'parked'];
 }
 
@@ -384,7 +523,8 @@ btnPlayer.onclick = () => {
   icon.href = new URL('favicon.ico', location.href).href;
   d.head.appendChild(icon);
   pCanvas = d.createElement('canvas');
-  pCanvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;display:block';
+  // cursor:none — a stray pointer parked on the TV is the one thing the table should never see
+  pCanvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;display:block;cursor:none';
   d.body.appendChild(pCanvas);
   pCtx = pCanvas.getContext('2d');
   const sizeP = () => {
@@ -395,6 +535,7 @@ btnPlayer.onclick = () => {
   playerWin.addEventListener('resize', sizeP);
   playerWin.addEventListener('beforeunload', () => setTimeout(() => { updateTally(); requestRender(true, false); }, 60));
   fullscreenPrompt(playerWin, d);
+  keepAwake(playerWin);
   sizeP();
   updateTally();
 };
@@ -429,6 +570,21 @@ function fullscreenPrompt(win, d) {
   paint();
 }
 
+/* Screen wake lock, so the TV and the laptop do not dim or sleep halfway
+   through a fight. The browser drops the lock whenever the page is hidden,
+   so it is taken again each time the window comes back. Secure contexts only
+   (localhost is one); elsewhere this quietly does nothing. */
+function keepAwake(win) {
+  const wl = win.navigator && win.navigator.wakeLock;
+  if (!wl) return;
+  const take = () => {
+    if (win.closed || win.document.visibilityState !== 'visible') return;
+    wl.request('screen').catch(() => {});
+  };
+  win.document.addEventListener('visibilitychange', take);
+  take();
+}
+
 /* ---------- canvas sizing (startup) ---------- */
 function sizeGM() {
   gmCanvas.width = stage.clientWidth * DPR;
@@ -438,6 +594,9 @@ function sizeGM() {
 }
 new ResizeObserver(sizeGM).observe(stage);
 sizeGM();
+keepAwake(window);
+loadTable();
+refreshTable();
 syncControls();
 paintDock();
 updateTally();

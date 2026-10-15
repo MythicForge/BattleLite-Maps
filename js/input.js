@@ -58,7 +58,12 @@ gmCanvas.addEventListener('pointerdown', e => {
   }
   if (S.tool === 'hide' || S.tool === 'reveal') {
     drag = {kind: 'fog', last: mapP, mode: S.tool};
+    beginFogEdit();
     strokeFog(mapP, mapP, S.tool);
+    return;
+  }
+  if (S.tool === 'gridmatch') {
+    drag = {kind: 'gridmatch', a: mapP, b: mapP};
     return;
   }
   if (S.tool === 'marker') {
@@ -108,6 +113,10 @@ gmCanvas.addEventListener('pointermove', e => {
       requestRender(true, true);          // the table sees this as you do it
       break;
     }
+    case 'gridmatch':
+      drag.b = mapP;
+      requestRender(true, false);
+      break;
     case 'fog':
       strokeFog(drag.last, mapP, drag.mode);
       drag.last = mapP;
@@ -143,6 +152,14 @@ gmCanvas.addEventListener('pointerup', e => {
     }
     requestRender();
   }
+  if (drag && drag.kind === 'fog') endFogEdit();
+  if (drag && drag.kind === 'gridmatch') {
+    const {a, b} = drag;
+    drag = null;
+    requestRender(true, false);
+    finishGridMatch(a, b);
+    return;
+  }
   if (drag) scheduleSave();
   drag = null;
   gmCanvas.style.cursor = 'grab';
@@ -151,12 +168,24 @@ gmCanvas.addEventListener('pointerleave', () => { mouse.over = false; requestRen
 
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y: fog is the only thing with history
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'z' || k === 'y') {
+      e.preventDefault();
+      if (k === 'y' || e.shiftKey) redoFog(); else undoFog();
+      scheduleSave();
+    }
+    return;
+  }
+  if (e.altKey) return;
   if (e.code === 'Space') { spaceHeld = true; e.preventDefault(); }
   if (e.key >= '1' && e.key <= '9') { showSlot(+e.key - 1); return; }
   if (e.key === 'm' || e.key === 'M') { setFollow(!S.follow); return; }
   if (e.key === 'p' || e.key === 'P') { sendPlayersTo(S.active, S.cam); return; }
   if (e.key === 'v' || e.key === 'V') { matchPlayerView(); return; }
+  if (e.key === 'b' || e.key === 'B') { setBlackout(!S.blackout); return; }
+  if (e.key === 'l' || e.key === 'L') { setInchLock(!S.table.lock); return; }
   const panelKey = PANEL_KEYS[e.key.toLowerCase()];
   if (panelKey) {                                  // one letter per dock key
     if (panelKey === 'scenes') setDrawer(!document.body.classList.contains('drawer'));
@@ -171,6 +200,7 @@ window.addEventListener('keydown', e => {
   }
   if (e.key === 'Escape') {
     if (drag && drag.kind === 'effect') { S.effects.pop(); drag = null; requestRender(); return; }
+    if (drag && drag.kind === 'gridmatch') { drag = null; setTool('select'); return; }
     if (escapeConsole()) return;                   // close the panel or drawer first
     S.selected = -1;
     setTool('select');

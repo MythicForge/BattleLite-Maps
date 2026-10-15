@@ -128,6 +128,91 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   ok('a newly opened scene gives the table a real camera to drag',
      !!S.pcam && s.editableFrame() === true);
 
+  // ---- grid shift onto a printed grid ----
+  S.gridSize = 70.4; S.gridOffX = 12.5; S.gridOffY = 3.2;
+  const shifted = S.active;
+  s.showSlot(shifted === 0 ? 1 : 0);
+  ok('the other map keeps its own grid shift', S.gridOffX === 0 && S.gridOffY === 0);
+  s.showSlot(shifted);
+  ok('switching back restores the shift and fractional cell size',
+     S.gridOffX === 12.5 && S.gridOffY === 3.2 && S.gridSize === 70.4);
+  S.gridOffX = 75; s.fitOffsetSliders();
+  ok('a shift past one cell wraps back into it', Math.abs(S.gridOffX - 4.6) < 1e-9, S.gridOffX);
+  S.gridType = 'hex'; S.gridOffY = 100; s.fitOffsetSliders();
+  ok('hex shift down wraps at two rows (g·√3), not one cell', S.gridOffY === 100);
+  S.gridType = 'square'; S.gridOffX = 12.5; S.gridOffY = 3.2;
+
+  // ---- match printed grid ----
+  const sb = require('./harness').sandbox;
+  const realPrompt = sb.prompt;
+  sb.prompt = () => '10';                                // "10 squares across"
+  S.gridSize = 147.6;
+  s.finishGridMatch({x: 61.5 + 127.5 * 2, y: 40 + 127.5}, {x: 61.5 + 127.5 * 12, y: 40 + 127.5 * 5});
+  ok('matching a 10x4 run sets the exact cell size', Math.abs(S.gridSize - 127.5) < 1e-9, S.gridSize);
+  ok('and shifts the grid onto the drag corner',
+     Math.abs(S.gridOffX - 61.5) < 1e-9 && Math.abs(S.gridOffY - 40) < 1e-9, S.gridOffX + ',' + S.gridOffY);
+  sb.prompt = () => null;                                // GM cancels the count
+  ok('cancelling the count changes nothing',
+     s.finishGridMatch({x: 0, y: 0}, {x: 500, y: 500}) === false && Math.abs(S.gridSize - 127.5) < 1e-9);
+  sb.prompt = realPrompt;
+  S.gridSize = 70.4; S.gridOffX = 12.5; S.gridOffY = 3.2;
+
+  // ---- blackout ----
+  s.setBlackout(true);
+  ok('B blacks out the table', S.blackout === true);
+  ok('blackout is not saved with the session', !('blackout' in s.buildSession()));
+  s.setBlackout(false);
+  ok('B again brings the map back', S.blackout === false);
+
+  // ---- fog undo ----
+  const hist = () => S.maps[S.active];
+  s.beginFogEdit(); s.stampFog(100, 100, 'reveal'); s.endFogEdit();
+  ok('a brush stroke is one undo step', hist().fogUndo.length === 1);
+  const patch = hist().fogUndo[0];
+  ok('a stroke keeps only the patch it touched, not the whole mask',
+     patch.data.width < s.fogC.width && patch.data.width > 0, patch.data.width + ' of ' + s.fogC.width);
+  ok('undo moves the step to redo', s.undoFog() === true && hist().fogUndo.length === 0 && hist().fogRedo.length === 1);
+  ok('nothing left to undo says so', s.undoFog() === false);
+  ok('redo moves it back', s.redoFog() === true && hist().fogUndo.length === 1 && hist().fogRedo.length === 0);
+  s.undoFog();
+  s.hideAll();
+  ok('a new edit after undo clears redo', hist().fogRedo.length === 0 && hist().fogUndo.length === 1);
+  for (let i = 0; i < 40; i++) { s.beginFogEdit(); s.stampFog(50, 50, 'hide'); s.endFogEdit(); }
+  ok('history is capped', hist().fogUndo.length === 30, hist().fogUndo.length);
+  const other = S.active === 0 ? 1 : 0;
+  s.showSlot(other);
+  ok('each map has its own fog history', !(S.maps[other].fogUndo || []).length);
+  s.showSlot(other === 0 ? 1 : 0);
+  ok('undo history is not written to the session',
+     !JSON.stringify(s.buildSession()).includes('fogUndo'));
+
+  // ---- table scale: one cell = one inch on the TV ----
+  ok('the lock refuses until pixels-per-inch is set', (s.setInchLock(true), S.table.lock === false));
+  s.setTablePpi(50);
+  s.setInchLock(true);
+  ok('locked, the table zoom is ppi / cell size',
+     Math.abs(s.playerCam().scale - 50 / S.gridSize) < 1e-9, s.playerCam().scale);
+  S.cam.scale *= 3;
+  ok('GM zoom does not change the locked table zoom', Math.abs(s.playerCam().scale - 50 / S.gridSize) < 1e-9);
+  s.setFollow(true);
+  ok('following still holds the locked zoom, and moves with the GM',
+     Math.abs(s.playerCam().scale - 50 / S.gridSize) < 1e-9 && s.playerCam().x === S.cam.x);
+  s.setFollow(false);
+  const lf = s.playerFrame();
+  ok('a frame corner moves rather than zooms while locked',
+     (s.frameHit(...toScreen(lf.x - lf.hw, lf.y - lf.hh)) || {}).mode === 'move');
+  const pScale = s.playerCam().scale;
+  s.resizeFrame({x: lf.x + lf.hw * 2, y: lf.y});
+  ok('resizing the frame is ignored while locked', s.playerCam().scale === pScale);
+  ok('the scale is saved per browser, not in the session',
+     JSON.parse(s.localStorage.getItem('battlemap.table.v1')).ppi === 50 &&
+     !JSON.stringify(s.buildSession()).includes('ppi'));
+  s.setRuler(true);
+  ok('the ruler takes over the table screen', S.calibrating === true);
+  s.setRuler(false);
+  s.setInchLock(false);
+  ok('unlocking gives the zoom back', s.lockedScale() === 0);
+
   // ---- session round trip ----
   const json = JSON.stringify(s.buildSession());
   ok('session serialises both maps', JSON.parse(json).maps.length === 2);
@@ -138,6 +223,8 @@ const tick = () => new Promise(r => setTimeout(r, 60));
   ok('restored map keeps its name and marker',
      S.maps[0].name === 'Cavern' && S.maps[0].effects.length === 1);
   ok('restore never comes back following', S.follow === false);
+  ok('restored map keeps its grid shift',
+     S.maps[shifted].gridOffX === 12.5 && S.maps[shifted].gridOffY === 3.2);
 
   // ---- autosave: no storage at all (file:// in Chrome) ----
   s.writeSave();

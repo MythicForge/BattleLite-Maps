@@ -38,6 +38,7 @@ const ctxStub = () => new Proxy({}, {
   get: (t, k) => {
     if (k === 'measureText') return () => ({width: 40});
     if (k === 'createRadialGradient') return () => ({addColorStop() {}});
+    if (k === 'getImageData') return (x, y, w, h) => ({width: w, height: h, data: {length: w * h * 4}});
     if (k in t) return t[k];
     return () => {};
   },
@@ -202,7 +203,7 @@ vm.runInContext(`this.api = {
   setFollow, sendPlayersTo, fitPlayers, matchPlayerView, playerCam, playerCamAsGM, fitCam,
   playerSrc, liveSrc, parkedSlot, liveSlotIndex,
   playerFrame, frameHit, moveFrame, resizeFrame, editableFrame, camMatrix,
-  buildSession, restoreSession, writeSave, restoreAutosave, setTool, jsonSize,
+  buildSession, restoreSession, writeSave, setBlackout, fitOffsetSliders, finishGridMatch, setInchLock, setTablePpi, setRuler, lockedScale, undoFog, redoFog, beginFogEdit, endFogEdit, stampFog, hideAll, restoreAutosave, setTool, jsonSize,
   saveStatusText: () => saveState.textContent,
   showPanel, togglePanel, escapeConsole, setDrawer, paintDock, canEncodeWebP, toWebP,
   get openPanel(){return openPanel},

@@ -49,6 +49,7 @@ function blankSlot(img, src, name) {
     rotation: 0,
     cam: null,                                     // filled on first open
     gridType: S.gridType, gridSize: S.gridSize, gridShade: S.gridShade, gridOp: S.gridOp,
+    gridOffX: 0, gridOffY: 0,                      // a new image has its own printed grid
     effects: [],
     fog, fogScale: scale,
     fogURL: null, fogDirty: true,      // cached PNG for saving; see fogDataURL
@@ -76,6 +77,7 @@ function commitActive() {
   m.cam = {...S.cam};
   m.gridType = S.gridType; m.gridSize = S.gridSize;
   m.gridShade = S.gridShade; m.gridOp = S.gridOp;
+  m.gridOffX = S.gridOffX; m.gridOffY = S.gridOffY;
   m.effects = S.effects;
   m.fog = fogC; m.fogScale = fogScale;
 }
@@ -90,6 +92,7 @@ function applySlot(i) {
   S.rotation = m.rotation;
   S.gridType = m.gridType; S.gridSize = m.gridSize;
   S.gridShade = m.gridShade; S.gridOp = m.gridOp;
+  S.gridOffX = m.gridOffX || 0; S.gridOffY = m.gridOffY || 0;
   S.effects = m.effects;
   S.selected = -1;
   fogC = m.fog; fogCtx = fogC.getContext('2d'); fogScale = m.fogScale;
@@ -154,6 +157,7 @@ function buildSession() {
       name: m.name, src: m.src,
       rotation: m.rotation, cam: m.cam,
       gridType: m.gridType, gridSize: m.gridSize, gridShade: m.gridShade, gridOp: m.gridOp,
+      gridOffX: m.gridOffX, gridOffY: m.gridOffY,
       effects: m.effects,
       fog: fogDataURL(m), fogScale: m.fogScale,
     })),
@@ -181,6 +185,8 @@ async function restoreSession(data) {
     slot.gridSize = d.gridSize || 70;
     slot.gridShade = d.gridShade ?? 0;
     slot.gridOp = d.gridOp ?? 0.6;
+    slot.gridOffX = d.gridOffX || 0;
+    slot.gridOffY = d.gridOffY || 0;
     slot.effects = d.effects || [];
     if (d.fog) {
       const f = await loadImg(d.fog);

@@ -11,7 +11,8 @@ const S = {
   rotation: 0,                       // degrees
   cam: {x: 0, y: 0, scale: 1},       // GM camera: map point (in rotated space) at canvas center
   gridType: 'square',                // 'off' | 'square' | 'hex'
-  gridSize: 70,                      // map px per cell
+  gridSize: 70,                      // map px per cell (fractional, to match a printed grid)
+  gridOffX: 0, gridOffY: 0,          // map px; shifts the grid onto the one drawn in the image
   gridShade: 0,                      // 0..255
   gridOp: 0.6,
   effects: [],                       // {type, x1,y1,x2,y2, color} — markers add {icon, size}
@@ -32,6 +33,13 @@ const S = {
   pcam: null,                        // player camera {x,y,scale}, in GM-canvas terms
   playerSlot: -1,                    // scene the table is on; -1 until a map exists
   follow: false,                     // table tracks the GM camera *and* scene changes
+  blackout: false,                   // table screen shows black; never saved
+
+  /* The TV itself, not the session: how many player-canvas pixels make an
+     inch, and whether one grid cell is held at exactly that. Kept per browser
+     in localStorage (ui.js), since it belongs to the screen on the table. */
+  table: {ppi: 0, lock: false},
+  calibrating: false,                // player screen shows the inch ruler
 };
 
 const MAX_SLOTS = 9;                 // 1–9 hotkeys
