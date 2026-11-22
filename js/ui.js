@@ -114,6 +114,7 @@ const toolButtons = {
 };
 function setTool(t) {
   S.tool = (S.tool === t) ? 'select' : t;        // toggle off = back to select
+  if (S.tool !== 'hide' && S.tool !== 'reveal') fogPoly = null;
   for (const [name, btn] of Object.entries(toolButtons)) {
     if (btn) btn.classList.toggle('active', name === S.tool);
   }
@@ -173,6 +174,8 @@ function syncControls() {
   document.getElementById('mkColor').value = S.mkColor;
   for (const b of gridSeg.children) b.classList.toggle('active', b.dataset.type === S.gridType);
   refreshFogUndo();
+  btnNight.classList.toggle('active', S.night);
+  refreshFxToggles();
   for (const b of document.querySelectorAll('#iconGrid button')) {
     b.classList.toggle('active', b.dataset.icon === S.mkIcon);
   }
@@ -209,6 +212,7 @@ for (const btn of gridSeg.children) {
     S.gridType = btn.dataset.type;
     for (const b of gridSeg.children) b.classList.toggle('active', b === btn);
     fitOffsetSliders();
+    refreshFxToggles();
     requestRender();
     scheduleSave();
   };
@@ -240,6 +244,29 @@ function finishGridMatch(a, b) {
 }
 
 /* ---------- fog ---------- */
+const fogShapeSeg = document.getElementById('fogShape');
+const FOG_SHAPE_NOTE = {
+  brush: 'Paint with a soft round brush.',
+  box: 'Drag a box over a room. Corners snap to the grid when close.',
+  poly: 'Click around the room, then double-click or Enter to finish. Backspace drops a point.',
+};
+function setFogShape(shape) {
+  S.fogShape = shape;
+  fogPoly = null;
+  for (const b of fogShapeSeg.children) b.classList.toggle('active', b.dataset.shape === shape);
+  document.getElementById('fogShapeNote').textContent = FOG_SHAPE_NOTE[shape];
+  if (S.tool !== 'hide' && S.tool !== 'reveal') setTool('reveal');   // a shape with no tool does nothing
+  requestRender(true, false);
+}
+for (const b of fogShapeSeg.children) b.onclick = () => setFogShape(b.dataset.shape);
+/* Close the shape being clicked out and apply it. */
+function finishFogPoly() {
+  const pts = fogPoly;
+  fogPoly = null;
+  if (pts && pts.length >= 3 && fillFogPoly(pts, S.tool)) scheduleSave();
+  requestRender(true, false);
+}
+
 document.getElementById('btnHideAll').onclick = () => { if (fogC) { hideAll(); scheduleSave(); } };
 document.getElementById('btnRevealAll').onclick = () => { if (fogC) { revealAll(); scheduleSave(); } };
 const btnFogUndo = document.getElementById('btnFogUndo');
@@ -259,6 +286,23 @@ document.getElementById('fxColor').oninput = e => {
   const sel = S.effects[S.selected];
   if (sel && sel.type !== 'marker') { sel.color = S.fxColor; requestRender(); scheduleSave(); }
 };
+/* Both are preferences for how templates behave, saved with the session.
+   Neither does anything on a hex grid or with the grid off — the note says so. */
+const btnFxSnap = document.getElementById('btnFxSnap');
+const btnFxCells = document.getElementById('btnFxCells');
+function refreshFxToggles() {
+  btnFxSnap.classList.toggle('active', S.fxSnap);
+  btnFxCells.classList.toggle('active', S.fxCells);
+  document.getElementById('fxNote').textContent = squareGrid()
+    ? 'Snapping starts templates on grid corners (cones and lines also mid-edge) and sizes them in 5 ft steps. ' +
+      'Squares hit shades every square whose centre the template covers.'
+    : 'Snapping and squares hit need a square grid (Grid panel).';
+}
+function setFxSnap(on) { S.fxSnap = !!on; refreshFxToggles(); scheduleSave(); }
+function setFxCells(on) { S.fxCells = !!on; refreshFxToggles(); requestRender(); scheduleSave(); }
+btnFxSnap.onclick = () => setFxSnap(!S.fxSnap);
+btnFxCells.onclick = () => setFxCells(!S.fxCells);
+
 document.getElementById('btnDeleteFx').onclick = () => {
   if (S.selected >= 0) { S.effects.splice(S.selected, 1); S.selected = -1; requestRender(); scheduleSave(); }
 };
@@ -409,13 +453,19 @@ const tablePpi = document.getElementById('tablePpi');
 function loadTable() {
   try {
     const t = JSON.parse(localStorage.getItem(TABLE_KEY) || 'null');
-    if (t && t.ppi > 0) S.table = {ppi: +t.ppi, lock: !!t.lock};
+    if (!t) return;
+    S.table = {
+      ppi: t.ppi > 0 ? +t.ppi : 0,
+      lock: t.ppi > 0 && !!t.lock,
+      bright: t.bright >= 0.2 && t.bright <= 1 ? +t.bright : 1,
+    };
   } catch (e) {}
 }
 function saveTable() {
   try { localStorage.setItem(TABLE_KEY, JSON.stringify(S.table)); } catch (e) {}
 }
 function refreshTable() {
+  putSlider('tableBright', 'tableBrightVal', Math.round(S.table.bright * 100), v => v + '%');
   if (S.table.ppi) putSlider('tablePpi', 'tablePpiVal', S.table.ppi, v => (+v).toFixed(1) + ' px');
   btnInchLock.disabled = !S.table.ppi;
   btnInchLock.classList.toggle('active', S.table.lock && !!S.table.ppi);
@@ -447,6 +497,23 @@ function setRuler(on) {
   requestRender(true, true);
 }
 tablePpi.oninput = () => setTablePpi(+tablePpi.value);
+/* Brightness belongs to the TV (saved with the table scale); the night tint
+   belongs to the scene (saved in the session). */
+function setBrightness(pct) {
+  S.table.bright = Math.min(1, Math.max(0.2, pct / 100));
+  saveTable();
+  refreshTable();
+  requestRender(false, true);
+}
+document.getElementById('tableBright').oninput = e => setBrightness(+e.target.value);
+const btnNight = document.getElementById('btnNight');
+function setNight(on) {
+  S.night = !!on;
+  btnNight.classList.toggle('active', S.night);
+  requestRender();
+  scheduleSave();
+}
+btnNight.onclick = () => setNight(!S.night);
 btnInchLock.onclick = () => setInchLock(!S.table.lock);
 btnRuler.onclick = () => setRuler(!S.calibrating);
 document.getElementById('btnTvDiag').onclick = () => {

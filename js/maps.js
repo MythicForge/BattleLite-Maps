@@ -50,6 +50,7 @@ function blankSlot(img, src, name) {
     cam: null,                                     // filled on first open
     gridType: S.gridType, gridSize: S.gridSize, gridShade: S.gridShade, gridOp: S.gridOp,
     gridOffX: 0, gridOffY: 0,                      // a new image has its own printed grid
+    night: false,
     effects: [],
     fog, fogScale: scale,
     fogURL: null, fogDirty: true,      // cached PNG for saving; see fogDataURL
@@ -78,6 +79,7 @@ function commitActive() {
   m.gridType = S.gridType; m.gridSize = S.gridSize;
   m.gridShade = S.gridShade; m.gridOp = S.gridOp;
   m.gridOffX = S.gridOffX; m.gridOffY = S.gridOffY;
+  m.night = S.night;
   m.effects = S.effects;
   m.fog = fogC; m.fogScale = fogScale;
 }
@@ -93,6 +95,7 @@ function applySlot(i) {
   S.gridType = m.gridType; S.gridSize = m.gridSize;
   S.gridShade = m.gridShade; S.gridOp = m.gridOp;
   S.gridOffX = m.gridOffX || 0; S.gridOffY = m.gridOffY || 0;
+  S.night = !!m.night;
   S.effects = m.effects;
   S.selected = -1;
   fogC = m.fog; fogCtx = fogC.getContext('2d'); fogScale = m.fogScale;
@@ -153,11 +156,12 @@ function buildSession() {
     active: S.active,
 
     fxColor: S.fxColor, mkColor: S.mkColor, mkIcon: S.mkIcon, brushSize: S.brushSize,
+    fxSnap: S.fxSnap, fxCells: S.fxCells,
     maps: S.maps.map(m => ({
       name: m.name, src: m.src,
       rotation: m.rotation, cam: m.cam,
       gridType: m.gridType, gridSize: m.gridSize, gridShade: m.gridShade, gridOp: m.gridOp,
-      gridOffX: m.gridOffX, gridOffY: m.gridOffY,
+      gridOffX: m.gridOffX, gridOffY: m.gridOffY, night: !!m.night,
       effects: m.effects,
       fog: fogDataURL(m), fogScale: m.fogScale,
     })),
@@ -187,6 +191,7 @@ async function restoreSession(data) {
     slot.gridOp = d.gridOp ?? 0.6;
     slot.gridOffX = d.gridOffX || 0;
     slot.gridOffY = d.gridOffY || 0;
+    slot.night = !!d.night;
     slot.effects = d.effects || [];
     if (d.fog) {
       const f = await loadImg(d.fog);
@@ -200,6 +205,8 @@ async function restoreSession(data) {
   S.maps = maps;
   S.active = -1;
   if (data.fxColor) S.fxColor = data.fxColor;
+  if (typeof data.fxSnap === 'boolean') S.fxSnap = data.fxSnap;
+  if (typeof data.fxCells === 'boolean') S.fxCells = data.fxCells;
   if (data.mkColor) S.mkColor = data.mkColor;
   if (data.mkIcon) S.mkIcon = data.mkIcon;
   if (data.brushSize) S.brushSize = data.brushSize;

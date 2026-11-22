@@ -68,6 +68,8 @@
         <dt>V</dt><dd>go to what the table is looking at</dd>
         <dt>B</dt><dd>black out the table screen / bring the map back</dd>
         <dt>L</dt><dd>lock the table to 1 inch cells / unlock</dd>
+        <dt>Q</dt><dd>ping where the cursor is · hold for a laser dot</dd>
+        <dt>Enter</dt><dd>finish a fog shape · Backspace drops a point</dd>
         <dt>F</dt><dd><em>on the player screen</em> — fullscreen, hides the address bar</dd>
         <dt>Wheel</dt><dd>zoom · drag to pan</dd>
         <dt>Right-drag</dt><dd>pan in any tool</dd>
@@ -86,9 +88,15 @@
   <section class="flyout" id="fly-fog" data-panel="fog" hidden>
     <h2>Fog of war</h2>
     <div class="row">
-      <button id="toolHide">Hide brush</button>
-      <button id="toolReveal">Reveal brush</button>
+      <button id="toolHide">Hide</button>
+      <button id="toolReveal">Reveal</button>
     </div>
+    <div class="seg" id="fogShape">
+      <button data-shape="brush" class="active">Brush</button>
+      <button data-shape="box">Box</button>
+      <button data-shape="poly">Shape</button>
+    </div>
+    <p class="note" id="fogShapeNote">Paint with a soft round brush.</p>
     <label class="slider">Brush size <span id="brushVal">80 px</span>
       <input type="range" id="brushSize" min="10" max="400" value="80" step="1">
     </label>
@@ -123,9 +131,16 @@
       <button id="toolSquare">▢ Square</button>
     </div>
     <div class="row">
+      <button id="btnFxSnap" class="active" title="Square grid only">Snap to grid</button>
+      <button id="btnFxCells" class="active" title="Square grid only">Squares hit</button>
+    </div>
+    <div class="row">
       <input type="color" id="fxColor" value="#ff4444" title="Effect color">
       <button id="btnDeleteFx" class="danger">Delete selected</button>
     </div>
+    <p class="note" id="fxNote">Snapping starts templates on grid corners (cones and lines also
+      mid-edge) and sizes them in 5 ft steps.
+      Squares hit shades every square whose centre the template covers.</p>
     <div class="row"><button id="btnClearFx" class="danger">Clear all effects</button></div>
   </section>
 
@@ -189,6 +204,12 @@
     </div>
     <div class="row">
       <button id="btnBlackout">Black out the table · B</button>
+    </div>
+    <label class="slider">TV brightness <span id="tableBrightVal">100%</span>
+      <input type="range" id="tableBright" min="20" max="100" value="100" step="1">
+    </label>
+    <div class="row">
+      <button id="btnNight">Night tint · this scene</button>
     </div>
     <p class="note" id="playerNote">Drag the dashed frame to reframe the table.</p>
 

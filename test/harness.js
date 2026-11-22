@@ -203,7 +203,7 @@ vm.runInContext(`this.api = {
   setFollow, sendPlayersTo, fitPlayers, matchPlayerView, playerCam, playerCamAsGM, fitCam,
   playerSrc, liveSrc, parkedSlot, liveSlotIndex,
   playerFrame, frameHit, moveFrame, resizeFrame, editableFrame, camMatrix,
-  buildSession, restoreSession, writeSave, setBlackout, fitOffsetSliders, finishGridMatch, setInchLock, setTablePpi, setRuler, lockedScale, undoFog, redoFog, beginFogEdit, endFogEdit, stampFog, hideAll, restoreAutosave, setTool, jsonSize,
+  buildSession, restoreSession, writeSave, setBlackout, fitOffsetSliders, coveredCells, snapCorner, snapAnchor, snapEffectEnd, effectContains, setFxSnap, setFxCells, addPing, setLaser, setBrightness, setNight, loadTable, get pings(){return pings}, get laser(){return laser}, fillFogPoly, boxPoints, snapFog, setFogShape, finishFogPoly, get fogPoly(){return fogPoly}, set fogPoly(v){fogPoly=v}, finishGridMatch, setInchLock, setTablePpi, setRuler, lockedScale, undoFog, redoFog, beginFogEdit, endFogEdit, stampFog, hideAll, restoreAutosave, setTool, jsonSize,
   saveStatusText: () => saveState.textContent,
   showPanel, togglePanel, escapeConsole, setDrawer, paintDock, canEncodeWebP, toWebP,
   get openPanel(){return openPanel},

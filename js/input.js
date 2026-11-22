@@ -46,7 +46,7 @@ gmCanvas.addEventListener('pointerdown', e => {
       const hit = hitEffect(mapP);
       if (hit >= 0) {
         S.selected = hit;
-        drag = {kind: 'move', idx: hit, last: mapP};
+        drag = {kind: 'move', idx: hit, last: mapP, start: mapP, orig: {...S.effects[hit]}};
         requestRender(true, false);
         return;
       }
@@ -54,6 +54,23 @@ gmCanvas.addEventListener('pointerdown', e => {
     }
     drag = {kind: 'pan', last: p};
     gmCanvas.style.cursor = 'grabbing';
+    return;
+  }
+  if ((S.tool === 'hide' || S.tool === 'reveal') && S.fogShape === 'box') {
+    const a = snapFog(mapP);
+    drag = {kind: 'fogbox', a, b: a};
+    return;
+  }
+  if ((S.tool === 'hide' || S.tool === 'reveal') && S.fogShape === 'poly') {
+    const pt = snapFog(mapP);
+    if (!fogPoly) fogPoly = [];
+    // double-click, or a click back on the first point, closes the shape
+    const first = fogPoly[0];
+    const nearFirst = first && fogPoly.length >= 3 &&
+      Math.hypot(first.x - pt.x, first.y - pt.y) * S.cam.scale < 10 * DPR;
+    if (e.detail >= 2 || nearFirst) { finishFogPoly(); return; }
+    fogPoly.push(pt);
+    requestRender(true, false);
     return;
   }
   if (S.tool === 'hide' || S.tool === 'reveal') {
@@ -77,10 +94,11 @@ gmCanvas.addEventListener('pointerdown', e => {
     requestRender();
     return;
   }
-  // effect tools: drag out from anchor
-  S.effects.push({type: S.tool, x1: mapP.x, y1: mapP.y, x2: mapP.x, y2: mapP.y, color: S.fxColor});
+  // effect tools: drag out from anchor, which sits on a grid corner when snapping
+  const a = fxSnapOn() ? snapAnchor(S.tool, mapP) : mapP;
+  S.effects.push({type: S.tool, x1: a.x, y1: a.y, x2: a.x, y2: a.y, color: S.fxColor});
   S.selected = S.effects.length - 1;
-  drag = {kind: 'effect'};
+  drag = {kind: 'effect', start: mapP};
   requestRender();
 });
 
@@ -88,6 +106,7 @@ gmCanvas.addEventListener('pointermove', e => {
   const p = canvasPos(e);
   mouse.x = p.x; mouse.y = p.y; mouse.over = true;
   if (!S.img) return;
+  if (laser) setLaser(screenToMap(p.x, p.y, S.cam, gmCanvas));   // Q held: the dot follows
 
   if (!drag) {
     if (S.tool === 'select') {
@@ -113,6 +132,10 @@ gmCanvas.addEventListener('pointermove', e => {
       requestRender(true, true);          // the table sees this as you do it
       break;
     }
+    case 'fogbox':
+      drag.b = snapFog(mapP);
+      requestRender(true, false);
+      break;
     case 'gridmatch':
       drag.b = mapP;
       requestRender(true, false);
@@ -123,6 +146,12 @@ gmCanvas.addEventListener('pointermove', e => {
       break;
     case 'effect': {
       const fx = S.effects[S.effects.length - 1];
+      if (fx.type !== 'marker' && fxSnapOn()) {
+        // nothing to snap until the pointer actually leaves the anchor
+        if (Math.hypot(mapP.x - drag.start.x, mapP.y - drag.start.y) * S.cam.scale > 4) snapEffectEnd(fx, mapP);
+        requestRender();
+        break;
+      }
       fx.x2 = mapP.x; fx.y2 = mapP.y;
       if (fx.type === 'marker') {
         const d = Math.hypot(fx.x2 - fx.x1, fx.y2 - fx.y1);
@@ -132,10 +161,14 @@ gmCanvas.addEventListener('pointermove', e => {
       break;
     }
     case 'move': {
-      const fx = S.effects[drag.idx];
-      const dx = mapP.x - drag.last.x, dy = mapP.y - drag.last.y;
-      fx.x1 += dx; fx.y1 += dy; fx.x2 += dx; fx.y2 += dy;
-      drag.last = mapP;
+      const fx = S.effects[drag.idx], o = drag.orig;
+      let dx = mapP.x - drag.start.x, dy = mapP.y - drag.start.y;
+      if (fx.type !== 'marker' && fxSnapOn()) {
+        // move in steps that keep the anchor on the grid
+        const a = snapAnchor(fx.type, {x: o.x1 + dx, y: o.y1 + dy});
+        dx = a.x - o.x1; dy = a.y - o.y1;
+      }
+      fx.x1 = o.x1 + dx; fx.y1 = o.y1 + dy; fx.x2 = o.x2 + dx; fx.y2 = o.y2 + dy;
       requestRender();
       break;
     }
@@ -153,6 +186,14 @@ gmCanvas.addEventListener('pointerup', e => {
     requestRender();
   }
   if (drag && drag.kind === 'fog') endFogEdit();
+  if (drag && drag.kind === 'fogbox') {
+    const {a, b} = drag;
+    // a click with no drag is a stray, not a zero-size room
+    if (Math.abs(b.x - a.x) * S.cam.scale > 4 && Math.abs(b.y - a.y) * S.cam.scale > 4) {
+      fillFogPoly(boxPoints(a, b), S.tool);
+    }
+    requestRender(true, false);
+  }
   if (drag && drag.kind === 'gridmatch') {
     const {a, b} = drag;
     drag = null;
@@ -186,11 +227,23 @@ window.addEventListener('keydown', e => {
   if (e.key === 'v' || e.key === 'V') { matchPlayerView(); return; }
   if (e.key === 'b' || e.key === 'B') { setBlackout(!S.blackout); return; }
   if (e.key === 'l' || e.key === 'L') { setInchLock(!S.table.lock); return; }
+  if (e.key === 'q' || e.key === 'Q') {
+    if (e.repeat || !S.img || !mouse.over) return;  // the ping goes where the cursor is
+    const p = screenToMap(mouse.x, mouse.y, S.cam, gmCanvas);
+    addPing(p);
+    setLaser(p);
+    return;
+  }
   const panelKey = PANEL_KEYS[e.key.toLowerCase()];
   if (panelKey) {                                  // one letter per dock key
     if (panelKey === 'scenes') setDrawer(!document.body.classList.contains('drawer'));
     else togglePanel(panelKey);
     return;
+  }
+  if (fogPoly) {                                   // a fog shape is being clicked out
+    if (e.key === 'Enter') { finishFogPoly(); return; }
+    if (e.key === 'Backspace') { fogPoly.pop(); if (!fogPoly.length) fogPoly = null; requestRender(true, false); return; }
+    if (e.key === 'Escape') { fogPoly = null; requestRender(true, false); return; }
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && S.selected >= 0) {
     S.effects.splice(S.selected, 1);
@@ -207,4 +260,9 @@ window.addEventListener('keydown', e => {
     requestRender();
   }
 });
-window.addEventListener('keyup', e => { if (e.code === 'Space') spaceHeld = false; });
+window.addEventListener('keyup', e => {
+  if (e.code === 'Space') spaceHeld = false;
+  if ((e.key === 'q' || e.key === 'Q') && laser) setLaser(null);
+});
+// a key released while another window had focus never sends keyup
+window.addEventListener('blur', () => { spaceHeld = false; if (laser) setLaser(null); });

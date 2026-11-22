@@ -123,6 +123,38 @@ function stampFog(mx, my, mode) {              // mx,my in map space
   touchFog(x - r, y - r, x + r, y + r);
 }
 
+/* A room in one go: fill a polygon (a box is four corners) with hard edges,
+   as a single undo step. */
+function fillFogPoly(pts, mode) {
+  if (!fogC || pts.length < 3) return false;
+  beginFogEdit();
+  fogCtx.globalCompositeOperation = mode === 'hide' ? 'source-over' : 'destination-out';
+  fogCtx.fillStyle = '#000';
+  fogCtx.beginPath();
+  for (const p of pts) fogCtx.lineTo(p.x * fogScale, p.y * fogScale);
+  fogCtx.closePath();
+  fogCtx.fill();
+  fogCtx.globalCompositeOperation = 'source-over';
+  const xs = pts.map(p => p.x * fogScale), ys = pts.map(p => p.y * fogScale);
+  touchFog(Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1);
+  endFogEdit();
+  fogChanged();
+  requestRender();
+  return true;
+}
+function boxPoints(a, b) {
+  return [{x: a.x, y: a.y}, {x: b.x, y: a.y}, {x: b.x, y: b.y}, {x: a.x, y: b.y}];
+}
+
+/* Box and shape corners pull onto a nearby square-grid corner, so a room
+   reveal lands on the walls. Only when close — caves stay freehand. */
+function snapFog(p) {
+  if (S.gridType !== 'square') return p;
+  const g = S.gridSize, ox = S.gridOffX || 0, oy = S.gridOffY || 0;
+  const c = {x: Math.round((p.x - ox) / g) * g + ox, y: Math.round((p.y - oy) / g) * g + oy};
+  return Math.hypot(c.x - p.x, c.y - p.y) < g * 0.2 ? c : p;
+}
+
 function strokeFog(fromMap, toMap, mode) {     // interpolate stamps for smooth stroke
   const d = Math.hypot(toMap.x - fromMap.x, toMap.y - fromMap.y);
   const step = Math.max(1, S.brushSize / 6);

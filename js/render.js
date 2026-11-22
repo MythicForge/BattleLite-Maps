@@ -14,6 +14,64 @@ function frame() {
   if (dirtyGM) renderView(gmCtx, gmCanvas, false, S.cam, liveSrc());
   if (dirtyP && playerWin && !playerWin.closed) renderView(pCtx, pCanvas, true, playerCam(), playerSrc());
   dirtyGM = dirtyP = false;
+  // a ping is the one thing that animates; the loop idles again once they fade
+  const now = Date.now();
+  while (pings.length && now - pings[0].t > PING_MS) pings.shift();
+  if (pings.length) requestRender(true, true);
+}
+
+/* ---------- ping and laser ----------
+   Q taps a ping where the cursor is: rings that pulse out on both screens, so
+   the GM can say "this door" without reaching across the minis. Holding Q
+   also leaves a laser dot that follows the mouse until Q comes up. Both are
+   tied to the map image they were made on, so a table parked on another
+   scene never sees them. Nothing here is saved. */
+const PING_MS = 1600;
+const pings = [];
+let laser = null;                              // {x, y, img} while Q is held
+function addPing(p) {
+  pings.push({x: p.x, y: p.y, img: S.img, t: Date.now()});
+  requestRender(true, true);
+}
+function setLaser(p) {
+  laser = p ? {x: p.x, y: p.y, img: S.img} : null;
+  requestRender(true, true);
+}
+function drawPings(ctx, cam, isPlayer, src) {
+  // one inch on a calibrated table, a sensible size everywhere else
+  const unit = (isPlayer && S.table.ppi ? S.table.ppi : 44 * DPR) / cam.scale;
+  const now = Date.now();
+  for (const p of pings) {
+    if (p.img !== src.img) continue;
+    const a = (now - p.t) / PING_MS;
+    for (const lag of [0, 0.3]) {             // two rings, the second trailing
+      const k = a - lag;
+      if (k < 0 || k > 1) continue;
+      const r = unit * (0.25 + k * 1.1);
+      ctx.globalAlpha = 1 - k;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.lineWidth = 7 / cam.scale * (isPlayer ? 1.4 : 1);
+      ctx.strokeStyle = 'rgba(0,0,0,.65)';      // dark halo reads on pale maps
+      ctx.stroke();
+      ctx.lineWidth = 3.5 / cam.scale * (isPlayer ? 1.4 : 1);
+      ctx.strokeStyle = '#ffd166';
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  if (laser && laser.img === src.img) {
+    ctx.beginPath();
+    ctx.arc(laser.x, laser.y, unit * 0.14, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff3b30';
+    ctx.shadowColor = '#ff3b30';
+    ctx.shadowBlur = 18 * DPR;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 2 / cam.scale;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+  }
 }
 
 /* ---------- what a canvas is drawing ----------
@@ -24,7 +82,7 @@ function liveSrc() {
   return {
     img: S.img, rotation: S.rotation, effects: S.effects, fog: fogC,
     gridType: S.gridType, gridSize: S.gridSize, gridShade: S.gridShade, gridOp: S.gridOp,
-    gridOffX: S.gridOffX, gridOffY: S.gridOffY,
+    gridOffX: S.gridOffX, gridOffY: S.gridOffY, night: S.night,
   };
 }
 /* The scene the table is parked on, when it is not the one the GM has open.
@@ -39,7 +97,7 @@ function playerSrc() {
   return {
     img: m.img, rotation: m.rotation, effects: m.effects, fog: m.fog,
     gridType: m.gridType, gridSize: m.gridSize, gridShade: m.gridShade, gridOp: m.gridOp,
-    gridOffX: m.gridOffX, gridOffY: m.gridOffY,
+    gridOffX: m.gridOffX, gridOffY: m.gridOffY, night: m.night,
   };
 }
 
@@ -183,6 +241,14 @@ function renderView(ctx, canvas, isPlayer, cam, src = liveSrc()) {
   if (src.gridType !== 'off') drawGrid(ctx, canvas, cam, m, src);
   drawEffects(ctx, cam, isPlayer, src);
 
+  // night: a cool multiply over the map, under the fog so hidden stays black
+  if (src.night) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = '#8494c4';
+    ctx.fillRect(0, 0, src.img.width, src.img.height);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   // fog last: hides map, grid, effects and markers on the player screen
   if (src.fog) {
     ctx.globalAlpha = isPlayer ? 1 : 0.45;
@@ -190,6 +256,15 @@ function renderView(ctx, canvas, isPlayer, cam, src = liveSrc()) {
     ctx.globalAlpha = 1;
   }
 
+  // TV brightness: a bright panel flat on a dark table is a lot
+  if (isPlayer && S.table.bright < 1) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = `rgba(0,0,0,${1 - S.table.bright})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(m);
+  }
+
+  drawPings(ctx, cam, isPlayer, src);           // after the dim, so a ping always reads
   if (!isPlayer) drawGMOverlay(ctx, canvas, cam, m);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
@@ -276,8 +351,22 @@ function drawEffects(ctx, cam, isPlayer, src = liveSrc()) {
     const e = src.effects[i];
     const selected = !isPlayer && i === S.selected;
     if (e.type === 'marker') { drawMarker(ctx, e, cam, selected, src.rotation); continue; }
-    effectPath(ctx, e);
-    ctx.globalAlpha = 0.35;
+    // the squares it hits, under the template, so the shape still reads on top
+    const cells = S.fxCells ? coveredCells(e, src) : [];
+    if (cells.length) {
+      const g = src.gridSize;
+      ctx.globalAlpha = 0.32;
+      ctx.fillStyle = e.color;
+      for (const c of cells) ctx.fillRect(c.x, c.y, g, g);
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = 1.5 / cam.scale;
+      ctx.beginPath();
+      for (const c of cells) ctx.rect(c.x, c.y, g, g);
+      ctx.stroke();
+    }
+    effectPath(ctx, e, src.gridSize);
+    ctx.globalAlpha = cells.length ? 0.15 : 0.35;
     ctx.fillStyle = e.color;
     ctx.fill();
     ctx.globalAlpha = 0.9;
@@ -314,8 +403,35 @@ function drawMarker(ctx, e, cam, selected, rotation = S.rotation) {
 }
 
 function drawGMOverlay(ctx, canvas, cam, m) {
+  const fogTool = S.tool === 'hide' || S.tool === 'reveal';
+  const fogInk = S.tool === 'hide' ? 'rgba(255,80,80,.95)' : 'rgba(120,200,255,.95)';
+  // fog box being dragged, or shape being clicked out, plus where the next corner lands
+  if (fogTool && S.fogShape !== 'brush') {
+    let pts = null;
+    if (drag && drag.kind === 'fogbox') pts = boxPoints(drag.a, drag.b);
+    else if (fogPoly) pts = mouse.over ? [...fogPoly, snapFog(screenToMap(mouse.x, mouse.y, cam, canvas))] : fogPoly;
+    if (pts) {
+      ctx.beginPath();
+      for (const p of pts) ctx.lineTo(p.x, p.y);
+      ctx.closePath();
+      ctx.fillStyle = S.tool === 'hide' ? 'rgba(255,80,80,.15)' : 'rgba(120,200,255,.15)';
+      ctx.fill();
+      ctx.strokeStyle = fogInk;
+      ctx.lineWidth = 2 / cam.scale;
+      ctx.setLineDash([8 / cam.scale, 5 / cam.scale]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (mouse.over && !drag) {
+      const p = snapFog(screenToMap(mouse.x, mouse.y, cam, canvas));
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4 / cam.scale, 0, Math.PI * 2);
+      ctx.fillStyle = fogInk;
+      ctx.fill();
+    }
+  }
   // fog brush cursor ring
-  if ((S.tool === 'hide' || S.tool === 'reveal') && mouse.over) {
+  if (fogTool && S.fogShape === 'brush' && mouse.over) {
     const p = screenToMap(mouse.x, mouse.y, cam, canvas);
     ctx.beginPath();
     ctx.arc(p.x, p.y, S.brushSize / 2, 0, Math.PI * 2);
@@ -355,7 +471,11 @@ function drawGMOverlay(ctx, canvas, cam, m) {
     const cells = len / S.gridSize;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.font = `${13 * DPR}px system-ui`;
-    const txt = `${cells.toFixed(1)} cells / ${(cells * 5).toFixed(0)} ft`;
+    const hit = S.fxCells ? coveredCells(e).length : 0;
+    const size = e.type === 'square'
+      ? `${(Math.abs(e.x2 - e.x1) / S.gridSize * 5).toFixed(0)} × ${(Math.abs(e.y2 - e.y1) / S.gridSize * 5).toFixed(0)} ft`
+      : `${cells.toFixed(1)} cells / ${(cells * 5).toFixed(0)} ft`;
+    const txt = hit ? `${size} · ${hit} square${hit === 1 ? '' : 's'}` : size;
     ctx.fillStyle = 'rgba(0,0,0,.7)';
     const tw = ctx.measureText(txt).width;
     ctx.fillRect(mouse.x + 14 * DPR, mouse.y - 24 * DPR, tw + 12 * DPR, 20 * DPR);
